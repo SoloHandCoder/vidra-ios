@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="en" style="background:#0a0a0a">
+    <head>
+        <meta charset="UTF-8" />
+        <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
+        <title>Streambert</title>
+        <link rel="icon" type="image/svg+xml" href="/logo.svg" />
+        <script>
+          // Android: window.electron must exist before any app module evaluates
+          // (several modules check it at import time). The real implementation is
+          // installed by src/mobile/electronShim.js; this proxy forwards to it.
+          (function () {
+            if (!/Android/i.test(navigator.userAgent)) return;
+            document.documentElement.setAttribute("data-mobile", "1");
+            window.__sbElectron = {};
+            window.electron = new Proxy({}, {
+              has: function () { return true; },
+              get: function (_, prop) {
+                var impl = window.__sbElectron;
+                if (prop in impl) return impl[prop];
+                if (prop === "cleanUserAgent") return navigator.userAgent.replace("; wv)", ")");
+                if (prop === "isMobile") return true;
+                if (typeof prop !== "string" || prop === "then") return undefined;
+                return function () {
+                  var f = window.__sbElectron[prop];
+                  return typeof f === "function" ? f.apply(null, arguments) : Promise.resolve(null);
+                };
+              },
+            });
+          })();
+        </script>
+    </head>
+    <body>
+        <div id="root"></div>
+        <script type="module" src="/src/main.jsx"></script>
+    </body>
+</html>

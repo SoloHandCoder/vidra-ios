@@ -1,0 +1,75 @@
+name: Build iOS
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install
+        run: npm ci
+
+      - name: Version
+        id: ver
+        run: echo "version=$(node -p "require('./package.json').version")" >> "$GITHUB_OUTPUT"
+
+      - name: Build web app
+        run: npm run build
+
+      - name: Sync Capacitor (pod install)
+        run: npx cap sync ios
+
+      - name: Build app (unsigned)
+        working-directory: ios/App
+        run: |
+          set -o pipefail
+          xcodebuild -workspace App.xcworkspace -scheme App -configuration Release \
+            -sdk iphoneos -destination 'generic/platform=iOS' -derivedDataPath build \
+            MARKETING_VERSION=${{ steps.ver.outputs.version }} CURRENT_PROJECT_VERSION=${{ github.run_number }} \
+            CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" \
+            build | tee xcodebuild.log | grep -E "error:|warning: .*Streambert|BUILD (SUCCEEDED|FAILED)" || true
+          test -d build/Build/Products/Release-iphoneos/App.app
+
+      - name: Package .ipa
+        run: |
+          mkdir -p out/Payload
+          cp -R ios/App/build/Build/Products/Release-iphoneos/App.app out/Payload/
+          cd out && zip -qry "Streambert-iOS-${{ steps.ver.outputs.version }}.ipa" Payload
+          ls -la
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Streambert-iOS-${{ steps.ver.outputs.version }}
+          path: out/*.ipa
+
+      - name: Build log
+        if: failure()
+        run: tail -n 200 ios/App/xcodebuild.log || true
+
+      - name: Publish release
+        if: startsWith(github.ref, 'refs/tags/v')
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          NOTES=release-notes/${GITHUB_REF_NAME}.md
+          [ -f "$NOTES" ] || { echo "Streambert iOS ${{ steps.ver.outputs.version }}" > /tmp/notes.md; NOTES=/tmp/notes.md; }
+          if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
+            gh release upload "$GITHUB_REF_NAME" out/*.ipa --clobber
+          else
+            gh release create "$GITHUB_REF_NAME" out/*.ipa --title "Streambert iOS ${{ steps.ver.outputs.version }}" --notes-file "$NOTES"
+          fi

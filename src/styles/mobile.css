@@ -1,0 +1,1884 @@
+/* ═══════════════════════════════════════════════════════════════════════════
+   Streambert Mobile: phone layout layer
+   ---------------------------------------------------------------------------
+   Loaded after global.css. Everything that changes layout is scoped under
+   html[data-mobile] (set by the mobile shim at startup), so the desktop
+   look stays untouched when the attribute is absent.
+     • portrait  → bottom navigation bar
+     • landscape → compact navigation rail on the left (saves vertical space)
+   Colors, fonts, cards and typography are inherited from global.css; this
+   file only resizes, re-flows and removes expensive effects.
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+/* Nav labels only exist for the mobile bar; hidden on desktop. */
+.sidebar-btn-label {
+    display: none;
+}
+
+html[data-mobile] {
+    --m-nav-h: 58px;
+    --m-safe-t: env(safe-area-inset-top, 0px);
+    --m-safe-b: env(safe-area-inset-bottom, 0px);
+    --m-safe-l: env(safe-area-inset-left, 0px);
+    --m-safe-r: env(safe-area-inset-right, 0px);
+    --m-pad: 16px;
+    --sidebar: 0px; /* toast / status pills use calc(var(--sidebar) + …) */
+    -webkit-text-size-adjust: 100%;
+    text-size-adjust: 100%;
+    touch-action: manipulation;
+    -webkit-tap-highlight-color: transparent;
+}
+
+html[data-mobile] body {
+    touch-action: manipulation;
+    -webkit-tap-highlight-color: transparent;
+    overscroll-behavior: none;
+}
+
+/* ── Global touch hygiene ──────────────────────────────────────────────── */
+html[data-mobile] * {
+    -webkit-tap-highlight-color: transparent;
+}
+
+/* Thin, invisible scrollbars on touch */
+html[data-mobile] ::-webkit-scrollbar {
+    width: 0;
+    height: 0;
+}
+
+/* No selection / long-press callouts on UI chrome */
+html[data-mobile] .sidebar,
+html[data-mobile] button,
+html[data-mobile] .btn,
+html[data-mobile] .card,
+html[data-mobile] .carousel-wrapper,
+html[data-mobile] .carousel-dots,
+html[data-mobile] .season-btn,
+html[data-mobile] .episode-card,
+html[data-mobile] .history-row,
+html[data-mobile] .search-result,
+html[data-mobile] .search-history-item,
+html[data-mobile] .section-title,
+html[data-mobile] .hero-actions,
+html[data-mobile] .detail-actions,
+html[data-mobile] .dl-toolbar,
+html[data-mobile] .context-menu,
+html[data-mobile] .source-dropdown,
+html[data-mobile] .player-overlay-group,
+html[data-mobile] .genre-tag,
+html[data-mobile] .tag {
+    -webkit-user-select: none;
+    user-select: none;
+    -webkit-touch-callout: none;
+}
+
+html[data-mobile] img {
+    -webkit-user-drag: none;
+    -webkit-touch-callout: none;
+}
+
+html[data-mobile] input,
+html[data-mobile] textarea,
+html[data-mobile] [contenteditable="true"] {
+    -webkit-user-select: text;
+    user-select: text;
+    -webkit-touch-callout: default;
+}
+
+/* backdrop-filter is very expensive in an Android WebView, especially on
+   anything overlapping a scroller. Kill it everywhere (incl. inline styles);
+   the semi-transparent backgrounds underneath already carry the look. */
+html[data-mobile] *,
+html[data-mobile] *::before,
+html[data-mobile] *::after {
+    -webkit-backdrop-filter: none !important;
+    backdrop-filter: none !important;
+}
+
+/* ── Custom window titlebar: never on mobile, never reserve space ────── */
+html[data-mobile] .window-titlebar {
+    display: none !important;
+}
+
+html[data-mobile][data-win-titlebar] body,
+html[data-mobile][data-win-titlebar][data-maximized] body {
+    padding: 0 !important;
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   Navigation: shared
+   ═══════════════════════════════════════════════════════════════════════════ */
+html[data-mobile] .sidebar-logo,
+html[data-mobile] .sidebar-sep,
+html[data-mobile] .sidebar-saved,
+html[data-mobile] .saved-thumb-tooltip,
+html[data-mobile] .sidebar-context-menu,
+html[data-mobile] .sidebar-btn .tooltip,
+html[data-mobile] .sidebar-btn--help,
+html[data-mobile] .sidebar-btn--quit,
+html[data-mobile] .sidebar-btn--back {
+    display: none !important;
+}
+
+/* Bottom group (settings) joins the main row */
+html[data-mobile] .sidebar-bottom {
+    display: contents;
+}
+
+/* Logical order: Home · Search · Library · Downloads · Settings */
+html[data-mobile] .sidebar-btn--home {
+    order: 1;
+}
+html[data-mobile] .sidebar-btn--search {
+    order: 2;
+}
+html[data-mobile] .sidebar-btn--discover {
+    order: 1;
+}
+html[data-mobile] .sidebar-btn--library {
+    order: 3;
+}
+html[data-mobile] .sidebar-btn--downloads {
+    order: 4;
+}
+html[data-mobile] .sidebar-btn--settings {
+    order: 5;
+}
+
+html[data-mobile] .sidebar {
+    background: var(--surface);
+    z-index: 150;
+}
+
+html[data-mobile] .sidebar-btn {
+    flex-direction: column;
+    gap: 3px;
+    background: transparent !important;
+    box-shadow: none !important;
+    border-radius: 12px;
+    color: var(--text3);
+    transition: color 0.15s;
+    touch-action: manipulation;
+}
+
+html[data-mobile] .sidebar-btn svg {
+    width: 22px;
+    height: 22px;
+    padding: 4px 14px;
+    box-sizing: content-box;
+    border-radius: 14px;
+    transition:
+        background 0.15s,
+        box-shadow 0.15s;
+}
+
+html[data-mobile] .sidebar-btn.active {
+    color: var(--red);
+}
+
+/* Desktop's red ring + tint, applied to the icon "pill" instead */
+html[data-mobile] .sidebar-btn.active svg {
+    background: var(--red-dim);
+    box-shadow: 0 0 0 1px var(--red);
+}
+
+html[data-mobile] .sidebar-btn:active svg {
+    background: color-mix(in srgb, var(--text) 10%, transparent);
+}
+
+html[data-mobile] .sidebar-btn-label {
+    display: block;
+    font-size: 10.5px;
+    font-weight: 600;
+    letter-spacing: 0.3px;
+    line-height: 1;
+    white-space: nowrap;
+}
+
+/* Download count badge: pin it to the icon, not the (wide) button corner */
+html[data-mobile] .sidebar-btn .sidebar-btn-badge {
+    top: 3px !important;
+    right: auto !important;
+    left: calc(50% + 6px);
+}
+
+/* Hide navigation while the player is fullscreen */
+html[data-mobile][data-player-fullscreen] .sidebar {
+    display: none !important;
+}
+
+/* ── Main scroller ─────────────────────────────────────────────────────── */
+html[data-mobile] .main,
+html[data-mobile][data-win-titlebar] .main,
+html[data-mobile][data-win-titlebar][data-maximized] .main {
+    margin: 0 !important;
+    width: 100%;
+    height: 100vh;
+    height: 100dvh;
+    overflow-y: auto;
+    overflow-x: hidden;
+    -webkit-overflow-scrolling: touch;
+    overscroll-behavior: contain;
+    padding-top: var(--m-safe-t);
+}
+
+html[data-mobile][data-player-fullscreen] .main {
+    padding-bottom: 0 !important;
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   Portrait: bottom navigation bar
+   ═══════════════════════════════════════════════════════════════════════════ */
+@media (orientation: portrait) {
+    html[data-mobile] .sidebar,
+    html[data-mobile][data-win-titlebar] .sidebar,
+    html[data-mobile][data-win-titlebar][data-maximized] .sidebar {
+        top: auto !important;
+        left: 0 !important;
+        right: 0;
+        bottom: 0 !important;
+        width: 100%;
+        height: calc(var(--m-nav-h) + var(--m-safe-b));
+        flex-direction: row;
+        align-items: stretch;
+        justify-content: space-around;
+        gap: 0;
+        padding: 0 var(--m-safe-r) var(--m-safe-b) var(--m-safe-l);
+        border-right: none;
+        border-top: 1px solid var(--border);
+        background: color-mix(in srgb, var(--surface) 97%, transparent);
+    }
+
+    html[data-mobile] .sidebar-btn {
+        flex: 1 1 0;
+        min-width: 0;
+        width: auto;
+        height: var(--m-nav-h);
+        border-radius: 0;
+    }
+
+    html[data-mobile] .main {
+        padding-bottom: calc(var(--m-nav-h) + var(--m-safe-b) + 8px);
+        padding-left: var(--m-safe-l);
+        padding-right: var(--m-safe-r);
+    }
+
+    /* Toast + inline status pill (App.jsx) sit above the bar */
+    html[data-mobile] .toast {
+        left: 12px;
+        right: 12px;
+        bottom: calc(var(--m-nav-h) + var(--m-safe-b) + 12px);
+        text-align: center;
+    }
+
+    html[data-mobile] div[style*="var(--sidebar)"][style*="position: fixed"] {
+        left: 12px !important;
+        right: 12px !important;
+        bottom: calc(var(--m-nav-h) + var(--m-safe-b) + 12px) !important;
+        max-width: none !important;
+    }
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   Landscape: navigation rail (left)
+   ═══════════════════════════════════════════════════════════════════════════ */
+@media (orientation: landscape) {
+    html[data-mobile] {
+        --sidebar: 68px;
+        --m-pad: 20px;
+    }
+
+    html[data-mobile] .sidebar,
+    html[data-mobile][data-win-titlebar] .sidebar,
+    html[data-mobile][data-win-titlebar][data-maximized] .sidebar {
+        top: 0 !important;
+        left: 0 !important;
+        bottom: 0 !important;
+        height: auto;
+        width: calc(var(--sidebar) + var(--m-safe-l));
+        padding: calc(6px + var(--m-safe-t)) 0 calc(6px + var(--m-safe-b))
+            var(--m-safe-l);
+        justify-content: center;
+        gap: 2px;
+    }
+
+    html[data-mobile] .sidebar-btn {
+        width: 64px;
+        height: 54px;
+    }
+
+    html[data-mobile] .sidebar-btn svg {
+        width: 20px;
+        height: 20px;
+        padding: 4px 12px;
+    }
+
+    html[data-mobile] .main,
+    html[data-mobile][data-win-titlebar] .main,
+    html[data-mobile][data-win-titlebar][data-maximized] .main {
+        margin-left: calc(var(--sidebar) + var(--m-safe-l)) !important;
+        width: auto;
+        padding-right: var(--m-safe-r);
+        padding-bottom: calc(var(--m-safe-b) + 16px);
+    }
+
+    html[data-mobile][data-player-fullscreen] .main {
+        margin-left: 0 !important;
+    }
+
+    html[data-mobile] .toast {
+        bottom: calc(16px + var(--m-safe-b));
+    }
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   Buttons & tap targets
+   ═══════════════════════════════════════════════════════════════════════════ */
+html[data-mobile] .btn {
+    min-height: 42px;
+    padding: 10px 18px;
+    justify-content: center;
+    touch-action: manipulation;
+}
+
+html[data-mobile] .btn--sm,
+html[data-mobile] .dl-btn--sm,
+html[data-mobile] .dl-btn--sm-primary,
+html[data-mobile] .dl-btn--sm-icon {
+    min-height: 38px;
+    padding: 8px 12px;
+}
+
+html[data-mobile] .btn-icon {
+    min-width: 42px;
+    padding: 10px;
+}
+
+html[data-mobile] .icon-btn,
+html[data-mobile] .blocked-modal-close,
+html[data-mobile] .trailer-close-btn,
+html[data-mobile] .cast-close-btn {
+    min-width: 40px;
+    min-height: 40px;
+    align-items: center;
+    justify-content: center;
+}
+
+html[data-mobile] .btn:active,
+html[data-mobile] .season-btn:active,
+html[data-mobile] .episode-card:active,
+html[data-mobile] .history-row:active,
+html[data-mobile] .search-result:active,
+html[data-mobile] .search-history-item:active {
+    opacity: 0.8;
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   Hover → touch: no sticky hover transforms, show hover-only controls
+   ═══════════════════════════════════════════════════════════════════════════ */
+@media (hover: none), (pointer: coarse) {
+    .card:hover,
+    .card.gamepad-focused {
+        transform: none;
+        box-shadow: none;
+        border-color: var(--border);
+    }
+
+    .card.ep-watched:hover {
+        border-color: rgba(72, 199, 116, 0.55);
+        box-shadow: 0 0 0 1px rgba(72, 199, 116, 0.2);
+    }
+
+    .card:hover .card-overlay {
+        opacity: 0;
+    }
+
+    .card:active {
+        transform: scale(0.97);
+        transition-duration: 0.1s;
+    }
+
+    .saved-thumb:hover {
+        transform: none;
+        box-shadow: none;
+    }
+
+    .btn-primary:hover {
+        box-shadow: none;
+    }
+
+    .close-confirm-btn-confirm:hover {
+        transform: none;
+    }
+
+    .sidebar-btn:hover:not(.active) {
+        color: var(--text3);
+        background: transparent;
+        box-shadow: none;
+    }
+
+    .episode-card:hover:not(.playing):not(.ep-watched) {
+        border-color: var(--border);
+        background: var(--surface2);
+    }
+
+    .history-row:hover {
+        border-color: var(--border);
+    }
+
+    .carousel-btn:hover {
+        background: color-mix(in srgb, var(--bg) 80%, transparent);
+        border-color: var(--border);
+        color: var(--text);
+    }
+
+    /* Controls that desktop reveals only on :hover */
+    .search-history-remove,
+    .history-remove-btn {
+        opacity: 0.85;
+    }
+
+    .player-wrap .player-overlay-btn,
+    .player-wrap .player-overlay-group {
+        opacity: 0.92;
+    }
+
+    .player-wrap--fullscreen .player-overlay-group,
+    .player-wrap--fullscreen .player-overlay-btn {
+        opacity: 0;
+    }
+}
+
+/* Same reveal under the mobile attribute, regardless of the media query */
+html[data-mobile] .search-history-remove,
+html[data-mobile] .history-remove-btn {
+    opacity: 0.85;
+    min-width: 40px;
+    min-height: 40px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+html[data-mobile] .player-wrap .player-overlay-btn,
+html[data-mobile] .player-wrap .player-overlay-group {
+    opacity: 0.92;
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   Home: hero
+   ═══════════════════════════════════════════════════════════════════════════ */
+html[data-mobile] .hero-content {
+    max-width: 100%;
+    right: 0;
+    padding: 0 var(--m-pad) 20px;
+}
+
+html[data-mobile] .hero-type {
+    font-size: 10px;
+    letter-spacing: 2.5px;
+    margin-bottom: 8px;
+}
+
+html[data-mobile] .hero-title {
+    font-size: 42px;
+    margin-bottom: 10px;
+    overflow-wrap: anywhere;
+}
+
+html[data-mobile] .hero-meta {
+    font-size: 12px;
+    gap: 12px;
+    margin-bottom: 12px;
+}
+
+html[data-mobile] .hero-overview {
+    font-size: 13px;
+    line-height: 1.55;
+    margin-bottom: 16px;
+}
+
+html[data-mobile] .hero-actions {
+    gap: 10px;
+}
+
+html[data-mobile] .hero-actions .btn {
+    flex: 1 1 0;
+    min-height: 44px;
+}
+
+@media (orientation: portrait) {
+    html[data-mobile] .hero {
+        height: clamp(380px, 120vw, 560px);
+    }
+
+    html[data-mobile] .hero-gradient {
+        background: linear-gradient(
+            to top,
+            var(--bg) 0%,
+            color-mix(in srgb, var(--bg) 88%, transparent) 28%,
+            color-mix(in srgb, var(--bg) 40%, transparent) 58%,
+            transparent 85%
+        );
+    }
+}
+
+@media (orientation: landscape) {
+    html[data-mobile] .hero {
+        height: clamp(250px, 72vh, 380px);
+    }
+
+    html[data-mobile] .hero-content {
+        max-width: 62%;
+        right: auto;
+        padding: 0 var(--m-pad) 18px;
+    }
+
+    html[data-mobile] .hero-title {
+        font-size: 38px;
+    }
+
+    html[data-mobile] .hero-overview {
+        -webkit-line-clamp: 2;
+    }
+
+    html[data-mobile] .hero-actions .btn {
+        flex: 0 0 auto;
+    }
+}
+
+/* ── Sections ──────────────────────────────────────────────────────────── */
+html[data-mobile] .section {
+    padding: 12px var(--m-pad);
+}
+
+html[data-mobile] .section-title {
+    font-size: 23px;
+    margin-bottom: 12px;
+    gap: 10px;
+}
+
+/* ── Card grids ────────────────────────────────────────────────────────── */
+html[data-mobile] .cards-grid,
+html[data-mobile] body.compact-mode .cards-grid {
+    gap: 10px;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+@media (max-width: 339px) {
+    html[data-mobile] .cards-grid {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+}
+
+@media (min-width: 560px) {
+    html[data-mobile] .cards-grid {
+        grid-template-columns: repeat(auto-fill, minmax(124px, 1fr));
+    }
+
+    html[data-mobile] body.compact-mode .cards-grid {
+        grid-template-columns: repeat(auto-fill, minmax(100px, 1fr));
+    }
+}
+
+html[data-mobile] .card {
+    transition:
+        transform 0.15s ease,
+        border-color 0.2s;
+    /* Skip layout/paint for off-screen cards (context menu is a sibling,
+       so paint containment is safe here). */
+    content-visibility: auto;
+    contain-intrinsic-size: auto 110px auto 240px;
+}
+
+html[data-mobile] .card-info {
+    padding: 8px 9px;
+}
+
+html[data-mobile] .card-title {
+    font-size: 12px;
+    margin-bottom: 2px;
+}
+
+html[data-mobile] .card-year {
+    font-size: 10.5px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+html[data-mobile] .card-badge {
+    top: 6px;
+    right: 6px;
+    font-size: 9px;
+    padding: 2px 5px;
+}
+
+html[data-mobile] .card-age-badge {
+    top: 6px;
+    left: 6px;
+    font-size: 8.5px;
+    padding: 3px 5px;
+}
+
+html[data-mobile] .card-watched-badge {
+    top: 6px;
+    right: 6px;
+    box-shadow: none;
+}
+
+html[data-mobile] .card.ep-watched {
+    box-shadow: 0 0 0 1px rgba(72, 199, 116, 0.2);
+}
+
+/* ── Horizontal rows (recommendations etc.) ────────────────────────────── */
+html[data-mobile] .scroll-row {
+    gap: 10px;
+    margin: 0 calc(-1 * var(--m-pad));
+    padding: 2px var(--m-pad) 8px;
+    scroll-padding-inline: var(--m-pad);
+    scroll-snap-type: x mandatory;
+    -webkit-overflow-scrolling: touch;
+    overscroll-behavior-x: contain;
+    scrollbar-width: none;
+}
+
+html[data-mobile] .scroll-row .card,
+html[data-mobile] body.compact-mode .scroll-row .card {
+    width: 31vw;
+    max-width: 150px;
+    min-width: 104px;
+    scroll-snap-align: start;
+}
+
+@media (orientation: landscape) {
+    html[data-mobile] .scroll-row .card {
+        width: 128px;
+    }
+}
+
+/* ── Trending carousel (coverflow) ─────────────────────────────────────── */
+html[data-mobile] .carousel-section {
+    padding: 10px 0 16px;
+}
+
+html[data-mobile] .carousel-section .section-title {
+    padding: 0 var(--m-pad);
+}
+
+html[data-mobile] .carousel-wrapper {
+    height: 300px;
+    touch-action: pan-y;
+}
+
+html[data-mobile] .carousel-item {
+    will-change: transform;
+}
+
+/* drop-shadow filter on the moving item is a big repaint cost */
+html[data-mobile] .carousel-item--active {
+    filter: none;
+}
+
+html[data-mobile] .carousel-item--active .carousel-poster-wrap {
+    box-shadow:
+        0 0 0 2px color-mix(in srgb, var(--text) 12%, transparent),
+        0 8px 20px color-mix(in srgb, var(--bg) 60%, transparent);
+}
+
+html[data-mobile] .carousel-poster,
+html[data-mobile] .carousel-poster--placeholder {
+    width: 164px;
+    height: 246px;
+}
+
+html[data-mobile] .carousel-btn {
+    width: 40px;
+    height: 56px;
+    top: 42%;
+    background: color-mix(in srgb, var(--bg) 70%, transparent);
+}
+
+html[data-mobile] .carousel-btn--left {
+    left: 6px;
+}
+
+html[data-mobile] .carousel-btn--right {
+    right: 6px;
+}
+
+/* Bigger hit area for the tiny dots without changing their look */
+html[data-mobile] .carousel-dots {
+    gap: 0;
+    padding: 0 var(--m-pad);
+}
+
+html[data-mobile] .carousel-dot {
+    box-sizing: content-box;
+    padding: 7px;
+    background-clip: content-box;
+}
+
+html[data-mobile] .carousel-dot--active {
+    transform: scale(1.35);
+}
+
+@media (orientation: landscape) {
+    html[data-mobile] .carousel-wrapper {
+        height: 280px;
+    }
+
+    html[data-mobile] .carousel-poster,
+    html[data-mobile] .carousel-poster--placeholder {
+        width: 150px;
+        height: 225px;
+    }
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   Search modal
+   ═══════════════════════════════════════════════════════════════════════════ */
+html[data-mobile] .modal-overlay {
+    background: color-mix(in srgb, var(--bg) 92%, transparent);
+    padding: calc(var(--m-safe-t) + 10px) calc(var(--m-safe-r) + 8px) 0
+        calc(var(--m-safe-l) + 8px);
+}
+
+html[data-mobile] .search-box {
+    width: 100%;
+    max-width: 680px;
+    border-radius: 14px;
+    box-shadow: 0 12px 30px rgba(0, 0, 0, 0.60);
+}
+
+html[data-mobile] .search-input-wrap {
+    padding: 8px 8px 8px 14px;
+    gap: 8px;
+}
+
+html[data-mobile] .search-input {
+    font-size: 17px;
+    min-width: 0;
+    min-height: 40px;
+}
+
+html[data-mobile] .search-results {
+    max-height: calc(100dvh - 90px - var(--m-safe-t) - var(--m-safe-b));
+    -webkit-overflow-scrolling: touch;
+    overscroll-behavior: contain;
+    padding: 6px;
+}
+
+html[data-mobile] .search-result {
+    padding: 8px;
+    gap: 12px;
+    min-height: 56px;
+}
+
+html[data-mobile] .search-result-title {
+    font-size: 14px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+html[data-mobile] .search-history-item {
+    min-height: 44px;
+    padding: 2px 4px 2px 12px;
+}
+
+html[data-mobile] .search-history-clear {
+    padding: 8px 6px;
+}
+
+html[data-mobile] .search-empty {
+    padding: 32px 16px;
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   Detail pages (Movie / TV)
+   ═══════════════════════════════════════════════════════════════════════════ */
+html[data-mobile] .detail-hero {
+    min-height: 0;
+}
+
+html[data-mobile] .detail-content {
+    gap: 18px;
+    padding: 20px var(--m-pad);
+}
+
+html[data-mobile] .detail-poster {
+    box-shadow: 0 6px 18px rgba(0, 0, 0, 0.55);
+}
+
+html[data-mobile] .detail-type {
+    font-size: 10px;
+    letter-spacing: 2.5px;
+    margin-bottom: 6px;
+}
+
+html[data-mobile] .detail-title {
+    font-size: 38px;
+    margin-bottom: 12px;
+    overflow-wrap: anywhere;
+}
+
+html[data-mobile] .genres {
+    margin-bottom: 12px;
+}
+
+html[data-mobile] .genre-tag {
+    font-size: 11px;
+    padding: 4px 10px;
+}
+
+html[data-mobile] .detail-meta {
+    gap: 6px 14px;
+    font-size: 12.5px;
+    margin-bottom: 14px;
+}
+
+html[data-mobile] .age-rating-pill {
+    flex-wrap: wrap;
+    max-width: 100%;
+    row-gap: 2px;
+}
+
+html[data-mobile] .detail-overview {
+    font-size: 13.5px;
+    line-height: 1.65;
+    margin-bottom: 18px;
+    max-width: none;
+}
+
+html[data-mobile] .detail-actions {
+    gap: 8px;
+}
+
+html[data-mobile] .detail-actions .btn {
+    padding: 10px 14px;
+    font-size: 13px;
+}
+
+@media (orientation: portrait) {
+    /* Backdrop only behind the top of the page, poster overlaps its fade */
+    html[data-mobile] .detail-bg,
+    html[data-mobile] .detail-gradient {
+        inset: 0 0 auto 0;
+        height: min(62vw, 340px);
+    }
+
+    html[data-mobile] .detail-bg {
+        background-position: center 25%;
+    }
+
+    html[data-mobile] .detail-gradient {
+        background: linear-gradient(
+            to top,
+            var(--bg) 0%,
+            color-mix(in srgb, var(--bg) 70%, transparent) 30%,
+            color-mix(in srgb, var(--bg) 25%, transparent) 65%,
+            transparent 100%
+        );
+    }
+
+    html[data-mobile] .detail-content {
+        flex-direction: column;
+        align-items: flex-start;
+        padding-top: min(30vw, 170px);
+    }
+
+    html[data-mobile] .detail-poster {
+        width: 128px;
+    }
+
+    html[data-mobile] .detail-info {
+        width: 100%;
+    }
+
+    /* Primary action (Play) gets its own full-width row */
+    html[data-mobile] .detail-actions .btn-primary {
+        flex: 1 1 100%;
+        min-height: 46px;
+        font-size: 14px;
+    }
+
+    html[data-mobile] .detail-actions .btn:not(.btn-primary) {
+        flex: 1 1 auto;
+    }
+}
+
+@media (orientation: landscape) {
+    html[data-mobile] .detail-content {
+        align-items: flex-start;
+        gap: 22px;
+    }
+
+    html[data-mobile] .detail-poster {
+        width: 150px;
+    }
+
+    html[data-mobile] .detail-title {
+        font-size: 40px;
+    }
+}
+
+/* ── Player ────────────────────────────────────────────────────────────── */
+@media (orientation: portrait) {
+    /* Edge-to-edge 16:9 player (aspect ratio comes from ::before) */
+    html[data-mobile] .player-wrap:not(.player-wrap--fullscreen) {
+        margin-left: calc(-1 * var(--m-pad));
+        margin-right: calc(-1 * var(--m-pad));
+        border-radius: 0;
+        border-left: none;
+        border-right: none;
+    }
+}
+
+html[data-mobile] .player-wrap--fullscreen {
+    padding: 0;
+}
+
+html[data-mobile] .player-overlay-btn {
+    top: 8px;
+    right: 8px;
+    padding: 7px 10px;
+    min-height: 34px;
+    font-size: 11.5px;
+    background: color-mix(in srgb, var(--bg) 82%, transparent);
+}
+
+html[data-mobile] .player-overlay-group {
+    top: 8px;
+    left: 8px;
+    right: 8px;
+    gap: 5px;
+    flex-wrap: wrap;
+    pointer-events: none;
+}
+
+html[data-mobile] .player-overlay-group > * {
+    pointer-events: auto;
+}
+
+/* When both exist, keep the group clear of the right-hand download button */
+html[data-mobile] .player-wrap:has(> .player-overlay-btn) .player-overlay-group {
+    right: 120px;
+}
+
+html[data-mobile] .player-overlay-group .player-overlay-btn {
+    top: auto;
+    right: auto;
+}
+
+html[data-mobile] .source-dropdown {
+    max-width: calc(100vw - 16px);
+    max-height: 60dvh;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+}
+
+html[data-mobile] .source-dropdown__item {
+    min-height: 42px;
+}
+
+html[data-mobile] .progress-mark-row .btn {
+    flex: 1 1 auto;
+}
+
+html[data-mobile] .anime-override-row {
+    flex-wrap: wrap;
+}
+
+html[data-mobile] .anime-override-input {
+    width: 60px;
+    min-height: 36px;
+    font-size: 14px;
+}
+
+/* ── Seasons ───────────────────────────────────────────────────────────── */
+html[data-mobile] .season-selector {
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    overflow-y: hidden;
+    margin: 0 calc(-1 * var(--m-pad)) 16px;
+    padding: 3px var(--m-pad) 4px;
+    scroll-padding-inline: var(--m-pad);
+    scroll-snap-type: x proximity;
+    -webkit-overflow-scrolling: touch;
+    overscroll-behavior-x: contain;
+    scrollbar-width: none;
+}
+
+html[data-mobile] .season-btn {
+    flex-shrink: 0;
+    min-height: 40px;
+    padding: 8px 16px;
+    white-space: nowrap;
+    scroll-snap-align: start;
+}
+
+/* ── Episodes ──────────────────────────────────────────────────────────── */
+html[data-mobile] .episodes-grid {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 8px;
+}
+
+@media (orientation: landscape) {
+    html[data-mobile] .episodes-grid {
+        grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+    }
+}
+
+html[data-mobile] .episode-card {
+    padding: 10px;
+    gap: 12px;
+}
+
+html[data-mobile] .episode-thumb {
+    width: 124px;
+}
+
+@media (max-width: 359px) {
+    html[data-mobile] .episode-thumb {
+        width: 104px;
+    }
+}
+
+html[data-mobile] .episode-name {
+    font-size: 13.5px;
+}
+
+html[data-mobile] .episode-desc {
+    font-size: 11.5px;
+}
+
+html[data-mobile] .episode-desc-toggle {
+    padding: 6px 0 2px;
+    font-size: 10.5px;
+}
+
+html[data-mobile] .ep-downloaded-badge {
+    width: 22px;
+    height: 22px;
+    font-size: 12px;
+}
+
+html[data-mobile] .ep-desc-overlay {
+    padding: 16px;
+}
+
+html[data-mobile] .ep-desc-popup {
+    width: 100%;
+    padding: 20px;
+    max-height: calc(100dvh - 64px - var(--m-safe-t) - var(--m-safe-b));
+    overflow-y: auto;
+}
+
+html[data-mobile] .ep-desc-popup-close {
+    min-height: 40px;
+    padding: 8px 20px;
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   Library / history
+   ═══════════════════════════════════════════════════════════════════════════ */
+html[data-mobile] .library-header {
+    padding: 24px var(--m-pad) 0;
+}
+
+html[data-mobile] .library-title,
+html[data-mobile] .dl-page__title {
+    font-size: 40px;
+}
+
+html[data-mobile] .library-sub,
+html[data-mobile] .dl-page__subtitle {
+    font-size: 13px;
+}
+
+html[data-mobile] .library-section {
+    padding: 20px var(--m-pad);
+}
+
+html[data-mobile] .history-row {
+    padding: 8px 6px 8px 10px;
+    gap: 12px;
+    min-height: 60px;
+    content-visibility: auto;
+    contain-intrinsic-size: auto 320px auto 64px;
+}
+
+html[data-mobile] .history-row .search-result-type {
+    font-size: 9px;
+    padding: 2px 6px;
+}
+
+html[data-mobile] .empty-state {
+    padding: 56px 24px;
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   Downloads page
+   ═══════════════════════════════════════════════════════════════════════════ */
+html[data-mobile] .dl-page {
+    padding: 24px var(--m-pad) 32px;
+}
+
+html[data-mobile] .dl-search-bar {
+    max-width: none;
+}
+
+html[data-mobile] .dl-search-bar__close {
+    min-width: 36px;
+    min-height: 36px;
+}
+
+html[data-mobile] .dl-toolbar {
+    padding: 6px 8px;
+    gap: 6px 8px;
+}
+
+html[data-mobile] .dl-toolbar__sort-btns {
+    flex-wrap: wrap;
+}
+
+html[data-mobile] .dl-toolbar__sort-btn,
+html[data-mobile] .dl-toolbar__toggle,
+html[data-mobile] .dl-toolbar__search-hint {
+    min-height: 36px;
+    padding: 6px 10px;
+}
+
+html[data-mobile] .dl-toolbar__dir-btn {
+    width: 36px;
+    height: 36px;
+}
+
+/* Keyboard hint (Ctrl+F) is meaningless on a phone */
+html[data-mobile] .dl-toolbar__search-hint-key {
+    display: none;
+}
+
+html[data-mobile] .dl-page__section {
+    margin-bottom: 32px;
+}
+
+html[data-mobile] .dl-page__list {
+    gap: 12px;
+}
+
+html[data-mobile] .dl-page__scan-controls {
+    flex-wrap: wrap;
+    width: 100%;
+}
+
+html[data-mobile] .dl-page__scan-input {
+    flex: 1 1 160px;
+    width: auto;
+    min-width: 0;
+    min-height: 40px;
+    font-size: 14px;
+}
+
+html[data-mobile] .dl-card {
+    padding: 12px;
+}
+
+html[data-mobile] .dl-card__header {
+    flex-wrap: wrap;
+}
+
+html[data-mobile] .dl-card__right {
+    margin-left: auto;
+    gap: 8px;
+}
+
+html[data-mobile] .dl-card__pct {
+    font-size: 24px;
+    min-width: 0;
+}
+
+html[data-mobile] .dl-card__row {
+    flex-wrap: wrap;
+    gap: 12px;
+}
+
+html[data-mobile] .dl-card__body {
+    flex: 1 1 0;
+}
+
+@media (orientation: portrait) {
+    html[data-mobile] .dl-card__actions {
+        flex: 1 1 100%;
+        flex-wrap: wrap;
+        justify-content: flex-end;
+    }
+}
+
+html[data-mobile] .dl-progress-pill {
+    padding: 4px 8px;
+}
+
+html[data-mobile] .dl-progress-pill__input {
+    font-size: 14px;
+}
+
+/* Expensive glow on progress fill */
+html[data-mobile] .dl-card__bar-fill--active {
+    box-shadow: none;
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   Settings page (mostly inline styles in SettingsPage.jsx)
+   ═══════════════════════════════════════════════════════════════════════════ */
+html[data-mobile] .main div[style*="padding: 40px 48px 80px"] {
+    padding: 22px var(--m-pad) 32px !important;
+}
+
+/* Sticky search / section nav bar */
+html[data-mobile] .main div[style*="position: sticky"][style*="padding: 0px 48px"] {
+    padding: 0 var(--m-pad) !important;
+    background: var(--bg) !important;
+}
+
+html[data-mobile] .main div[style*="position: sticky"] button {
+    min-height: 36px;
+    min-width: 36px;
+}
+
+/* Wide minimum widths that would overflow a phone */
+html[data-mobile] [style*="min-width: 260px"],
+html[data-mobile] [style*="min-width: 230px"],
+html[data-mobile] [style*="min-width: 220px"],
+html[data-mobile] [style*="min-width: 200px"],
+html[data-mobile] [style*="min-width: 380px"] {
+    min-width: 0 !important;
+}
+
+html[data-mobile] .main [style*="max-width: 340px"],
+html[data-mobile] .main [style*="max-width: 400px"],
+html[data-mobile] .main [style*="max-width: 540px"] {
+    max-width: none !important;
+}
+
+/* Rows that put text + action side by side: let the action wrap below */
+html[data-mobile] .main div[style*="justify-content: space-between"][style*="gap: 24px"] {
+    flex-wrap: wrap;
+    gap: 12px !important;
+}
+
+html[data-mobile] .settings-section {
+    margin-bottom: 28px;
+}
+
+html[data-mobile] .settings-sep {
+    margin-bottom: 28px;
+}
+
+html[data-mobile] .apikey-input {
+    min-height: 44px;
+    font-size: 15px;
+}
+
+html[data-mobile] .main code {
+    word-break: break-all;
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   Modals & overlays → full-width sheets with internal scroll
+   ═══════════════════════════════════════════════════════════════════════════ */
+html[data-mobile] .modal-backdrop,
+html[data-mobile] .cast-overlay {
+    align-items: flex-end;
+    justify-content: center;
+    padding: calc(var(--m-safe-t) + 12px) var(--m-safe-r) 0 var(--m-safe-l);
+    background: color-mix(in srgb, var(--bg) 82%, transparent);
+}
+
+html[data-mobile] .download-modal,
+html[data-mobile] .cast-modal {
+    width: 100%;
+    max-width: 640px;
+    max-height: calc(100dvh - var(--m-safe-t) - 12px);
+    border-radius: 16px 16px 0 0;
+    border-bottom: none;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    -webkit-overflow-scrolling: touch;
+    padding-bottom: var(--m-safe-b);
+    box-shadow: 0 -10px 30px rgba(0, 0, 0, 0.60);
+    animation: m-sheet-up 0.22s ease;
+}
+
+html[data-mobile] .download-modal-header,
+html[data-mobile] .cast-modal-header {
+    position: sticky;
+    top: 0;
+    z-index: 2;
+    background: var(--surface2);
+    padding: 10px 10px 10px 18px;
+    gap: 10px;
+}
+
+html[data-mobile] .download-url-block,
+html[data-mobile] .download-instructions,
+html[data-mobile] .download-ready {
+    padding: 16px;
+}
+
+html[data-mobile] .cast-modal-body {
+    max-height: none;
+    padding: 16px var(--m-pad) 20px;
+}
+
+html[data-mobile] .cast-grid {
+    grid-template-columns: repeat(auto-fill, minmax(92px, 1fr));
+    gap: 14px 8px;
+}
+
+html[data-mobile] .cast-person-photo {
+    width: 72px;
+    height: 72px;
+}
+
+html[data-mobile] .cast-person-name {
+    font-size: 12px;
+}
+
+@keyframes m-sheet-up {
+    from {
+        transform: translateY(40px);
+        opacity: 0;
+    }
+    to {
+        transform: translateY(0);
+        opacity: 1;
+    }
+}
+
+/* Trailer: full-width 16:9 */
+html[data-mobile] .trailer-overlay {
+    background: color-mix(in srgb, var(--bg) 92%, transparent);
+    padding: var(--m-safe-t) var(--m-safe-r) var(--m-safe-b) var(--m-safe-l);
+}
+
+html[data-mobile] .trailer-modal {
+    width: 100%;
+    max-width: 960px;
+    border-radius: 0;
+    border-left: none;
+    border-right: none;
+}
+
+@media (orientation: landscape) {
+    /* Fit 16:9 video + ~50px header into the short viewport */
+    html[data-mobile] .trailer-modal {
+        width: min(
+            calc(100vw - var(--m-safe-l) - var(--m-safe-r)),
+            calc((100dvh - var(--m-safe-t) - var(--m-safe-b) - 52px) * 16 / 9)
+        );
+        border-radius: 10px;
+    }
+}
+
+html[data-mobile] .trailer-modal-header {
+    padding: 8px 8px 8px 14px;
+    gap: 8px;
+}
+
+html[data-mobile] .trailer-openbrowser-btn {
+    min-height: 36px;
+    padding: 6px 10px;
+}
+
+/* Close-confirm + blocked-stats */
+html[data-mobile] .close-confirm-overlay,
+html[data-mobile] .blocked-modal-overlay {
+    padding: calc(var(--m-safe-t) + 16px) 16px calc(var(--m-safe-b) + 16px);
+}
+
+html[data-mobile] .close-confirm-modal {
+    width: 100%;
+    max-width: 420px;
+    padding: 28px 20px 20px;
+    box-shadow:
+        0 0 0 1px rgba(229, 9, 20, 0.15),
+        0 16px 40px color-mix(in srgb, var(--bg) 70%, transparent);
+}
+
+html[data-mobile] .close-confirm-btn-confirm,
+html[data-mobile] .close-confirm-btn-cancel {
+    min-height: 46px;
+}
+
+html[data-mobile] .blocked-modal {
+    width: 100%;
+    max-width: 420px;
+    max-height: calc(100dvh - 32px - var(--m-safe-t) - var(--m-safe-b));
+}
+
+html[data-mobile] .blocked-modal-row {
+    min-height: 40px;
+}
+
+/* Context menus (long-press) */
+html[data-mobile] .context-menu,
+html[data-mobile] .sidebar-context-menu {
+    max-width: calc(100vw - 16px);
+}
+
+html[data-mobile] .context-menu-item {
+    min-height: 44px;
+    font-size: 14px;
+}
+
+/* Inline-styled modals (Download / Subtitles / Update / Wyzie / Shortcuts /
+   Settings confirm dialogs): `position:fixed; inset:0` overlay > box. */
+html[data-mobile] div[style*="position: fixed"][style*="inset: 0"] {
+    padding: calc(var(--m-safe-t) + 12px) 12px calc(var(--m-safe-b) + 12px);
+}
+
+html[data-mobile] div[style*="position: fixed"][style*="inset: 0"] > div {
+    max-width: calc(100vw - 24px) !important;
+    min-width: 0 !important;
+    max-height: calc(100dvh - 24px - var(--m-safe-t) - var(--m-safe-b)) !important;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    -webkit-overflow-scrolling: touch;
+}
+
+/* Settings dialogs use 36px 40px padding */
+html[data-mobile] div[style*="position: fixed"][style*="inset: 0"] > div[style*="padding: 36px 40px"] {
+    padding: 26px 20px !important;
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   Setup screen (TMDB key) + status banners
+   ═══════════════════════════════════════════════════════════════════════════ */
+html[data-mobile] .apikey-modal {
+    background: var(--bg);
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+    align-items: flex-start;
+    padding: calc(var(--m-safe-t) + 16px) calc(var(--m-safe-r) + 16px)
+        calc(var(--m-safe-b) + 16px) calc(var(--m-safe-l) + 16px);
+}
+
+html[data-mobile] .apikey-box {
+    margin: auto;
+    padding: 32px 20px 26px;
+    border-radius: 14px;
+}
+
+html[data-mobile] .apikey-logo {
+    width: 68px;
+    height: 68px;
+    margin-bottom: 14px;
+}
+
+html[data-mobile] .apikey-title {
+    font-size: 42px;
+}
+
+html[data-mobile] .apikey-sub {
+    font-size: 13.5px;
+    margin-bottom: 22px;
+}
+
+html[data-mobile] .apikey-box .btn {
+    width: 100%;
+    min-height: 46px;
+}
+
+html[data-mobile] .apikey-link {
+    display: inline-block;
+    padding: 4px 0;
+}
+
+@media (orientation: landscape) {
+    html[data-mobile] .apikey-box {
+        padding: 22px 24px 20px;
+    }
+
+    html[data-mobile] .apikey-logo {
+        width: 52px;
+        height: 52px;
+        margin-bottom: 8px;
+    }
+
+    html[data-mobile] .apikey-title {
+        font-size: 36px;
+    }
+}
+
+html[data-mobile] .api-status-banner {
+    flex-wrap: wrap;
+    gap: 8px 12px;
+    padding: 10px var(--m-pad);
+    font-size: 12.5px;
+}
+
+html[data-mobile] .api-status-btn {
+    min-height: 36px;
+    padding: 6px 14px;
+}
+
+html[data-mobile] .loader {
+    padding: 56px 16px;
+}
+
+/* Lighter, cheaper entrance animation (no translate on whole pages) */
+html[data-mobile] .fade-in {
+    animation: m-fade 0.2s ease;
+}
+
+@keyframes m-fade {
+    from {
+        opacity: 0;
+    }
+    to {
+        opacity: 1;
+    }
+}
+
+/* Respect reduced motion */
+@media (prefers-reduced-motion: reduce) {
+    html[data-mobile] *,
+    html[data-mobile] *::before,
+    html[data-mobile] *::after {
+        animation-duration: 0.001ms !important;
+        transition-duration: 0.001ms !important;
+    }
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   Picture-in-picture: only the playing video is visible
+   ═══════════════════════════════════════════════════════════════════════════ */
+html[data-pip] body * {
+    visibility: hidden !important;
+}
+html[data-pip] .sidebar,
+html[data-pip] .player-overlay-group {
+    display: none !important;
+}
+html[data-pip] [data-sb-pip-target] {
+    visibility: visible !important;
+    position: fixed !important;
+    inset: 0 !important;
+    width: 100vw !important;
+    height: 100vh !important;
+    z-index: 2147483647 !important;
+    transform: none !important;
+    border-radius: 0 !important;
+}
+html[data-pip],
+html[data-pip] body {
+    background: #000 !important;
+    overflow: hidden !important;
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   Android TV / D-pad: visible focus ring
+   ═══════════════════════════════════════════════════════════════════════════ */
+html[data-tv] .gamepad-focused,
+html[data-keynav] .gamepad-focused {
+    outline: 3px solid var(--red) !important;
+    outline-offset: 3px !important;
+    border-radius: var(--radius);
+    box-shadow: 0 0 0 6px rgba(229, 9, 20, 0.25) !important;
+    transition: outline-color 0.1s, box-shadow 0.1s;
+}
+html[data-tv] .card.gamepad-focused,
+html[data-keynav] .card.gamepad-focused {
+    transform: scale(1.06);
+    z-index: 2;
+}
+html[data-tv] *:focus-visible {
+    outline: 3px solid var(--red);
+    outline-offset: 2px;
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   Pull to refresh (Home)
+   ═══════════════════════════════════════════════════════════════════════════ */
+.sb-ptr {
+    position: fixed;
+    top: calc(env(safe-area-inset-top) + 8px);
+    left: 50%;
+    width: 40px;
+    height: 40px;
+    margin-top: 0;
+    border-radius: 50%;
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    color: var(--text2);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 5000;
+    pointer-events: none;
+    opacity: 0;
+    transform: translate(-50%, -56px);
+    box-shadow: 0 6px 18px rgba(0, 0, 0, 0.5);
+    will-change: transform, opacity;
+}
+html:not([data-mobile]) .sb-ptr {
+    display: none;
+}
+.sb-ptr--ready {
+    color: #fff;
+    background: var(--red);
+    border-color: var(--red);
+}
+.sb-ptr--spin svg {
+    animation: sb-ptr-spin 0.7s linear infinite;
+}
+@keyframes sb-ptr-spin {
+    to {
+        transform: rotate(360deg);
+    }
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   Season download
+   ═══════════════════════════════════════════════════════════════════════════ */
+.sb-season-dl-btn {
+    margin: 0 0 14px;
+    min-height: 42px;
+}
+#sb-season-dl {
+    position: fixed;
+    left: 12px;
+    right: 12px;
+    bottom: calc(env(safe-area-inset-bottom) + 84px);
+    z-index: 5500;
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 12px 14px 12px;
+    display: grid;
+    grid-template-columns: 1fr auto;
+    gap: 8px 12px;
+    align-items: center;
+    box-shadow: 0 10px 30px rgba(0, 0, 0, 0.55);
+    transform: translateY(140%);
+    opacity: 0;
+    transition: transform 0.25s ease, opacity 0.25s ease;
+    pointer-events: none;
+}
+#sb-season-dl.sb-sdl--on {
+    transform: none;
+    opacity: 1;
+    pointer-events: auto;
+}
+.sb-sdl__text {
+    font-size: 13px;
+    color: var(--text);
+    line-height: 1.4;
+}
+.sb-sdl__bar {
+    grid-column: 1 / -1;
+    height: 4px;
+    border-radius: 2px;
+    background: var(--surface3);
+    overflow: hidden;
+}
+.sb-sdl__fill {
+    height: 100%;
+    width: 0;
+    background: var(--red);
+    transition: width 0.3s ease;
+}
+.sb-sdl__x {
+    background: transparent;
+    border: 1px solid var(--border);
+    color: var(--text2);
+    border-radius: 8px;
+    padding: 6px 12px;
+    font: 500 12px var(--font-body);
+}
+html[data-mobile] .sidebar ~ * #sb-season-dl {
+    bottom: calc(env(safe-area-inset-bottom) + 84px);
+}
+@media (orientation: landscape) {
+    #sb-season-dl {
+        bottom: calc(env(safe-area-inset-bottom) + 12px);
+        left: 84px;
+    }
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   Profiles
+   ═══════════════════════════════════════════════════════════════════════════ */
+.sb-avatar {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 22%;
+    color: #fff;
+    font-family: var(--font-display);
+    letter-spacing: 0.02em;
+    flex-shrink: 0;
+    box-shadow: inset 0 -6px 14px rgba(0, 0, 0, 0.18);
+}
+.sb-profiles {
+    position: fixed;
+    inset: 0;
+    z-index: 2147483000;
+    background: var(--bg);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 28px;
+    padding: 24px;
+    opacity: 0;
+    transition: opacity 0.22s ease;
+}
+.sb-profiles--in {
+    opacity: 1;
+}
+.sb-profiles--out {
+    opacity: 0;
+}
+.sb-profiles__title {
+    font-family: var(--font-display);
+    font-size: 40px;
+    color: var(--text);
+    letter-spacing: 0.02em;
+}
+.sb-profiles__grid {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: center;
+    gap: 22px;
+    max-width: 520px;
+}
+.sb-profiles__item {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 10px;
+    background: none;
+    border: none;
+    color: var(--text2);
+    font: 500 15px var(--font-body);
+    padding: 6px;
+    border-radius: 16px;
+    transition: transform 0.15s ease;
+}
+.sb-profiles__item:active {
+    transform: scale(0.94);
+}
+.sb-profiles__item:focus-visible .sb-avatar,
+.sb-profiles__item--current .sb-avatar {
+    outline: 3px solid #fff;
+    outline-offset: 3px;
+}
+.sb-profiles__name {
+    max-width: 110px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+.sb-profiles__manage {
+    background: transparent;
+    border: 1px solid var(--border);
+    color: var(--text2);
+    border-radius: 10px;
+    padding: 10px 18px;
+    font: 500 14px var(--font-body);
+}
+
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   Tablets & unfolded foldables: desktop-style sidebar
+   ═══════════════════════════════════════════════════════════════════════════ */
+@media (min-width: 768px) and (min-height: 560px) {
+    html[data-mobile] {
+        --sidebar: 84px;
+        --m-pad: 28px;
+    }
+    html[data-mobile] .sidebar,
+    html[data-mobile][data-win-titlebar] .sidebar,
+    html[data-mobile][data-win-titlebar][data-maximized] .sidebar {
+        top: 0 !important;
+        left: 0 !important;
+        right: auto !important;
+        bottom: 0 !important;
+        width: calc(var(--sidebar) + var(--m-safe-l));
+        height: auto;
+        flex-direction: column;
+        align-items: center;
+        justify-content: flex-start;
+        gap: 4px;
+        padding: calc(14px + var(--m-safe-t)) 0 calc(12px + var(--m-safe-b)) var(--m-safe-l);
+        border-top: none;
+        border-right: 1px solid var(--border);
+        background: var(--surface);
+    }
+    /* logo and saved titles like the desktop app */
+    html[data-mobile] .sidebar-logo {
+        display: block !important;
+        width: 48px;
+        height: 48px;
+        margin-bottom: 10px;
+        order: 0;
+    }
+    html[data-mobile] .sidebar-saved {
+        display: flex !important;
+        order: 6;
+        flex: 1 1 auto;
+        min-height: 0;
+        overflow-y: auto;
+        width: 100%;
+        align-items: center;
+        margin-top: 6px;
+    }
+    html[data-mobile] .sidebar-sep {
+        display: block !important;
+        order: 5;
+    }
+    html[data-mobile] .sidebar-bottom {
+        order: 7;
+        margin-top: auto;
+    }
+    html[data-mobile] .sidebar-btn {
+        flex: 0 0 auto;
+        width: 76px;
+        height: 60px;
+        border-radius: 14px;
+    }
+    html[data-mobile] .main,
+    html[data-mobile][data-win-titlebar] .main,
+    html[data-mobile][data-win-titlebar][data-maximized] .main {
+        margin-left: calc(var(--sidebar) + var(--m-safe-l)) !important;
+        width: auto;
+        padding-bottom: calc(var(--m-safe-b) + 20px) !important;
+        padding-left: 0;
+    }
+    html[data-mobile][data-player-fullscreen] .main {
+        margin-left: 0 !important;
+    }
+    html[data-mobile] .toast,
+    html[data-mobile] div[style*="var(--sidebar)"][style*="position: fixed"] {
+        left: calc(var(--sidebar) + 16px) !important;
+        right: auto !important;
+        bottom: calc(16px + var(--m-safe-b)) !important;
+        max-width: 420px !important;
+    }
+    html[data-mobile] .sbx-sheet-overlay {
+        align-items: center;
+    }
+    html[data-mobile] .sbx-sheet {
+        border-radius: 18px;
+        border-bottom: 1px solid var(--border);
+    }
+    html[data-mobile] #sb-season-dl {
+        left: auto;
+        right: 20px;
+        bottom: calc(20px + var(--m-safe-b));
+        width: 420px;
+    }
+}

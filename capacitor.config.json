@@ -1,0 +1,18 @@
+{
+  "appId": "com.streambert.ios",
+  "appName": "Streambert",
+  "webDir": "dist",
+  "backgroundColor": "#0a0a0a",
+  "ios": {
+    "contentInset": "never",
+    "allowsLinkPreview": false,
+    "scrollEnabled": true,
+    "limitsNavigationsToAppBoundDomains": false,
+    "preferredContentMode": "mobile",
+    "webContentsDebuggingEnabled": true,
+    "appendUserAgent": "Version/18.0 Safari/604.1"
+  },
+  "server": {
+    "iosScheme": "capacitor"
+  }
+}

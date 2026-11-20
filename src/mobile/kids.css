@@ -1,0 +1,59 @@
+.sbk-lock {
+  position: fixed;
+  inset: 0;
+  z-index: 2147483646;
+  background: rgba(0, 0, 0, 0.72);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+  animation: sbFade 0.2s ease-out;
+}
+.sbk-box {
+  width: 100%;
+  max-width: 340px;
+  padding: 26px 24px 20px;
+  border-radius: 18px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.5);
+}
+.sbk-box.shake { animation: sbkShake 0.4s; }
+@keyframes sbkShake {
+  20%, 60% { transform: translateX(-8px); }
+  40%, 80% { transform: translateX(8px); }
+}
+.sbk-icon { font-size: 34px; }
+.sbk-title { font-size: 18px; font-weight: 700; color: var(--text); }
+.sbk-reason { font-size: 13px; color: var(--text3); text-align: center; line-height: 1.5; }
+.sbk-input {
+  width: 100%;
+  text-align: center;
+  font-size: 22px;
+  letter-spacing: 8px;
+  padding: 10px;
+  border-radius: 10px;
+  border: 1px solid var(--border);
+  background: var(--surface2);
+  color: var(--text);
+  outline: none;
+}
+.sbk-input:focus { border-color: var(--red); }
+.sbk-msg { min-height: 18px; font-size: 13px; color: var(--red); }
+.sbk-btns { display: flex; gap: 8px; width: 100%; }
+.sbk-btns .btn { flex: 1; justify-content: center; }
+.sbk-device { margin-top: 4px; }
+.sb-kids-badge {
+  display: inline-block;
+  margin-top: 4px;
+  padding: 1px 8px;
+  border-radius: 8px;
+  background: #27ae60;
+  color: #fff;
+  font: 700 11px var(--font-body);
+  letter-spacing: 0.5px;
+}
