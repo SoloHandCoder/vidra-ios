@@ -6,6 +6,7 @@ import { useRatings, getRatingForItem } from "../utils/useRatings";
 import { isRestricted } from "../utils/ageRating";
 import { storage, STORAGE_KEYS } from "../utils/storage";
 import { MyListsSection, StatsSection } from "../mobile/LibraryUI";
+import { GoalsSection } from "../mobile/GoalsUI";
 import { UpcomingSection } from "../mobile/DiscoveryUI";
 
 export default function LibraryPage({
@@ -140,6 +141,8 @@ export default function LibraryPage({
           onMarkUnwatched={onMarkUnwatched}
         />
       )}
+
+      {isMobile && <GoalsSection onSelect={onSelect} />}
 
       {isMobile && <StatsSection apiKey={apiKey} onSelect={onSelect} />}
 

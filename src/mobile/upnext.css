@@ -1,0 +1,65 @@
+.sbun {
+  position: absolute;
+  right: 16px;
+  bottom: 64px;
+  z-index: 30;
+  max-width: calc(100% - 32px);
+  pointer-events: none;
+  animation: sbunIn 0.35s var(--sb-ease-spring, ease) backwards;
+}
+.sbun.left { right: auto; left: 16px; }
+.sbun-card {
+  pointer-events: auto;
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  width: 380px;
+  max-width: 100%;
+  padding: 10px;
+  border-radius: 14px;
+  background: rgba(14, 14, 14, 0.92);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.6);
+  backdrop-filter: blur(8px);
+  color: #fff;
+}
+.sbun-thumb {
+  position: relative;
+  flex: 0 0 auto;
+  width: 132px;
+  aspect-ratio: 16 / 9;
+  border-radius: 8px;
+  overflow: hidden;
+  background: var(--surface3, #222);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.sbun-thumb img { width: 100%; height: 100%; object-fit: cover; }
+.sbun-ph { color: var(--text3); font-size: 22px; }
+.sbun-ring {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.45);
+}
+.sbun-ring svg { position: absolute; width: 44px; height: 44px; transform: rotate(-90deg); }
+.sbun-ring-bg { fill: none; stroke: rgba(255, 255, 255, 0.25); stroke-width: 3; }
+.sbun-ring-fg { fill: none; stroke: var(--red); stroke-width: 3; stroke-linecap: round; stroke-dasharray: 97.4; transition: stroke-dashoffset 1s linear; }
+.sbun-ring b { position: relative; font: 800 16px var(--font-body); }
+.sbun-body { min-width: 0; flex: 1; display: flex; flex-direction: column; gap: 2px; }
+.sbun-kicker { font-size: 10px; font-weight: 800; letter-spacing: 1.4px; text-transform: uppercase; color: var(--red); }
+.sbun-sub { font-size: 12px; color: rgba(255, 255, 255, 0.65); }
+.sbun-title { font-size: 14px; font-weight: 700; line-height: 1.3; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.sbun-btns { display: flex; gap: 6px; margin-top: 6px; flex-wrap: wrap; }
+@keyframes sbunIn { from { opacity: 0; transform: translate3d(0, 12px, 0) scale(0.96); } to { opacity: 1; transform: none; } }
+/* small (phone, portrait) players: the card fills the bottom of the player */
+html[data-mobile] .sbun { left: 8px; right: 8px; bottom: 8px; max-width: none; }
+html[data-mobile] .sbun-card { width: auto; padding: 8px; gap: 10px; }
+html[data-mobile] .sbun-thumb { width: 92px; }
+html[data-mobile] .sbun-btns .btn { padding: 6px 12px; }
+html[data-mobile][data-player-fullscreen] .sbun { left: auto; right: 24px; bottom: 72px; }
+html[data-mobile][data-player-fullscreen] .sbun-card { width: 380px; }
+html[data-mobile][data-player-fullscreen] .sbun-thumb { width: 132px; }

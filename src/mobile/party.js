@@ -296,11 +296,25 @@ export function playFromQueue(key) {
   shareQueue();
   openItem(it);
 }
+/** host: everyone moves to this title / episode (up next) */
+export function followMe(item) {
+  if (!isHost()) return;
+  const it = cleanItem({ ...item, by: S.name });
+  if (!it) return;
+  S.queue = S.queue.filter((q) => q.key !== it.key);
+  send({ type: "goto", item: it });
+  addChat({ sys: true, text: `Everyone is moving to ${label(it)}`, at: Date.now() });
+  emit();
+}
+/** in a party but not the host: playback follows the host */
+export const followsHost = () => !!S && !!S.host && S.host !== S.me;
+
 /** host: the next queue item, if any */
 export const nextInQueue = () => (S && isHost() ? S.queue[0] || null : null);
 
 function openItem(it) {
-  window.__sbNav?.open?.({ id: it.id, media_type: it.media_type, title: it.title, name: it.title, poster_path: it.poster_path, season: it.season, episode: it.episode });
+  // partyPlay: the show page starts that episode straight away
+  window.__sbNav?.open?.({ id: it.id, media_type: it.media_type, title: it.title, name: it.title, poster_path: it.poster_path, season: it.season, episode: it.episode, partyPlay: it.episode != null });
 }
 const label = (m) => `${m.title || ""}${m.media_type === "tv" && m.season != null ? ` S${m.season}E${m.episode}` : ""}`;
 

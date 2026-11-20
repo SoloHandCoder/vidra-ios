@@ -68,6 +68,7 @@ import {
   clearFailoverSource,
 } from "../utils/storage";
 import { useAutoplay } from "../utils/useAutoplay";
+import { UpNextCard } from "../mobile/UpNext";
 import { fetchAniSkipTimings } from "../utils/aniSkip";
 import {
   fetchTVRating,
@@ -88,6 +89,7 @@ import { setPlayerGamepadActive } from "../utils/gamepadPlayerState";
 import HiAnimeLoader from "../components/HiAnimeLoader";
 import { PartyButton } from "../mobile/PartyUI";
 import { RateButton, ListsButton } from "../mobile/LibraryUI";
+import { GoalButton } from "../mobile/GoalsUI";
 
 // ── Partial-circle progress icon (cached per pct tier) ───────────────────────
 // Uses a single SVG arc. Three instances (25/50/75)
@@ -1507,9 +1509,15 @@ export default function TVPage({
               onMarkWatchedRef.current?.(currentProgressKey);
             }
 
-            // Autoplay trigger
+            // Up next: when the credits start (AniSkip outro if known, else the last ~35s)
+            const outroAt = Number(skipTimings?.outro?.startTime);
+            const atCredits =
+              Number.isFinite(outroAt) && outroAt > result.duration * 0.6
+                ? ct >= outroAt - 1
+                : remaining <= Math.max(watchedThreshold, 35);
             if (
-              remaining <= watchedThreshold &&
+              atCredits &&
+              remaining >= 0 &&
               !localCountdownStartedRef.current
             ) {
               localCountdownStartedRef.current = true;
@@ -1671,6 +1679,22 @@ export default function TVPage({
     return null;
   }, [selectedEp, currentSeasonEpisodes]);
 
+  // the next episode as a watch-party item (the host's up next moves everyone)
+  const upNextPartyItem = useMemo(
+    () =>
+      nextEp
+        ? {
+            id: item.id,
+            media_type: "tv",
+            title: d?.name || item.name || item.title || "",
+            poster_path: d?.poster_path || item.poster_path,
+            season: selectedSeason,
+            episode: nextEp.episode_number,
+          }
+        : null,
+    [nextEp, item, d, selectedSeason],
+  );
+
   const {
     autoplayCountdown,
     countdownStarted,
@@ -1679,7 +1703,26 @@ export default function TVPage({
     cancelAutoplay,
     playNow,
     resetAutoplay,
-  } = useAutoplay({ nextEp, playEpisode, restricted });
+    autoplayTotal,
+    upNextQueue,
+  } = useAutoplay({ nextEp, playEpisode, restricted, partyItem: upNextPartyItem });
+
+  // watch party: the host moved everyone to an episode, start it here too
+  const partyPlayedRef = useRef(null);
+  useEffect(() => {
+    if (!item?.partyPlay || item.episode == null || partyPlayedRef.current === item) return;
+    const season = Number(item.season ?? 1);
+    if (season !== selectedSeason) {
+      setSelectedSeason(season);
+      return;
+    }
+    const ep = currentSeasonEpisodes?.find(
+      (e) => e.episode_number === Number(item.episode) && (e.season_number == null || e.season_number === season),
+    );
+    if (!ep) return;
+    partyPlayedRef.current = item;
+    playEpisode(ep);
+  }, [item, selectedSeason, currentSeasonEpisodes, playEpisode]);
 
   useEffect(() => {
     resetAutoplayRef.current = resetAutoplay;
@@ -1873,6 +1916,7 @@ export default function TVPage({
                     <>
                       <ListsButton item={{ ...item, media_type: "tv" }} />
                       <RateButton item={{ ...item, media_type: "tv" }} />
+                      <GoalButton show={d} />
                       <PartyButton />
                     </>
                   )}
@@ -2051,175 +2095,32 @@ export default function TVPage({
                     </button>
                   </div>
                 )}
-                {autoplayCountdown !== null && (
-                  <div
-                    style={{
-                      position: "absolute",
-                      inset: 0,
-                      zIndex: 30,
-                      display: "flex",
-                      justifyContent:
-                        autoplayNextLayout === "left"
-                          ? "flex-start"
-                          : "flex-end",
-                      background: "rgba(0,0,0,0.88)",
-                      borderRadius: "inherit",
-                      backdropFilter: "blur(6px)",
-                      animation: "fadeIn 0.4s ease",
-                    }}
-                  >
-                    <div
-                      style={{
-                        width: "40%",
-                        minWidth: "320px",
-                        maxWidth: "480px",
-                        height: "100%",
-                        background:
-                          autoplayNextLayout === "left"
-                            ? "linear-gradient(90deg, rgba(0,0,0,0.95) 0%, rgba(0,0,0,0.85) 60%, rgba(0,0,0,0) 100%)"
-                            : "linear-gradient(270deg, rgba(0,0,0,0.95) 0%, rgba(0,0,0,0.85) 60%, rgba(0,0,0,0) 100%)",
-                        display: "flex",
-                        flexDirection: "column",
-                        justifyContent: "center",
-                        padding: "40px",
-                        boxSizing: "border-box",
-                        textAlign: "left",
-                      }}
-                    >
-                      <div
-                        style={{
-                          fontSize: "11px",
-                          fontWeight: "700",
-                          letterSpacing: "1.5px",
-                          textTransform: "uppercase",
-                          color: "var(--red)",
-                          marginBottom: "8px",
-                        }}
-                      >
-                        Up Next
-                      </div>
-
-                      {/* Cover Still */}
-                      <div
-                        style={{
-                          width: "100%",
-                          aspectRatio: "16/9",
-                          borderRadius: "8px",
-                          overflow: "hidden",
-                          border: "1px solid rgba(255,255,255,0.1)",
-                          marginBottom: "18px",
-                          boxShadow: "0 8px 24px rgba(0,0,0,0.6)",
-                          background: "var(--surface3)",
-                          display: "flex",
-                          alignItems: "center",
-                          justifyContent: "center",
-                        }}
-                      >
-                        {nextEp?.still_path ? (
-                          <img
-                            src={imgUrl(nextEp.still_path, "w300")}
-                            alt={nextEp?.name}
-                            style={{
-                              width: "100%",
-                              height: "100%",
-                              objectFit: "cover",
-                            }}
-                          />
-                        ) : (
-                          <span
-                            style={{
-                              display: "inline-flex",
-                              width: 32,
-                              height: 32,
-                              color: "var(--text3)",
-                            }}
-                          >
-                            <PlayIcon />
-                          </span>
-                        )}
-                      </div>
-
-                      {/* Episode Meta */}
-                      <div
-                        style={{
-                          fontSize: "13px",
-                          fontWeight: "600",
-                          color: "var(--text2)",
-                          marginBottom: "4px",
-                        }}
-                      >
-                        Season {selectedSeason} · Episode{" "}
-                        {nextEp?.episode_number}
-                      </div>
-                      <div
-                        style={{
-                          fontSize: "20px",
-                          fontWeight: "700",
-                          color: "white",
-                          marginBottom: "8px",
-                          lineHeight: "1.3",
-                          wordBreak: "break-word",
-                        }}
-                      >
-                        {nextEp?.name}
-                      </div>
-
-                      {/* Countdown */}
-                      {autoplayCountdown > 0 ? (
-                        <div
-                          style={{
-                            fontSize: "14px",
-                            color: "var(--text3)",
-                            marginBottom: "20px",
-                          }}
-                        >
-                          Starting in{" "}
-                          <span style={{ color: "white", fontWeight: "600" }}>
-                            {autoplayCountdown}
-                          </span>
-                          s...
-                        </div>
-                      ) : (
-                        <div style={{ height: "20px", marginBottom: "20px" }} />
-                      )}
-
-                      {/* Buttons */}
-                      <div
-                        style={{
-                          display: "flex",
-                          gap: "12px",
-                          marginTop: "4px",
-                        }}
-                      >
-                        <button
-                          className="btn btn-primary"
-                          style={{
-                            padding: "10px 22px",
-                            fontSize: "14px",
-                            fontWeight: "600",
-                            background: "var(--red)",
-                            borderColor: "var(--red)",
-                            boxShadow: "var(--red-glow)",
-                          }}
-                          onClick={playNow}
-                        >
-                          Play Now
-                        </button>
-                        <button
-                          className="btn btn-ghost"
-                          style={{
-                            padding: "10px 22px",
-                            fontSize: "14px",
-                            fontWeight: "600",
-                            background: "rgba(255,255,255,0.05)",
-                          }}
-                          onClick={cancelAutoplay}
-                        >
-                          Cancel
-                        </button>
-                      </div>
-                    </div>
-                  </div>
+                {autoplayCountdown !== null && (upNextQueue || nextEp) && (
+                  <UpNextCard
+                    countdown={autoplayCountdown}
+                    total={autoplayTotal}
+                    kicker={upNextQueue ? "Up next in the party" : "Up next"}
+                    title={upNextQueue ? upNextQueue.title : nextEp?.name}
+                    subtitle={
+                      upNextQueue
+                        ? upNextQueue.season != null
+                          ? `S${upNextQueue.season} · E${upNextQueue.episode}`
+                          : ""
+                        : `S${selectedSeason} · E${nextEp?.episode_number}`
+                    }
+                    image={
+                      upNextQueue
+                        ? upNextQueue.poster_path
+                          ? imgUrl(upNextQueue.poster_path, "w300")
+                          : null
+                        : nextEp?.still_path
+                          ? imgUrl(nextEp.still_path, "w300")
+                          : null
+                    }
+                    layout={autoplayNextLayout}
+                    onPlay={playNow}
+                    onDismiss={cancelAutoplay}
+                  />
                 )}
                 <MobileWebView
                   ref={webviewRef}
