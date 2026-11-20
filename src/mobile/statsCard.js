@@ -1,4 +1,4 @@
-// Shareable "My year in Streambert" card (1080×1920 image, drawn on a canvas).
+// Shareable "My year in Vidra" card (1080×1920 image, drawn on a canvas).
 import { t } from "./i18n.js";
 
 const W = 1080, H = 1920;
@@ -56,7 +56,7 @@ export async function makeStatsCard(d) {
   ctx.fillStyle = "#fff";
   ctx.font = font(700, 34);
   ctx.globalAlpha = 0.75;
-  ctx.fillText(t(`Your ${d.year} in Streambert`).toUpperCase(), 80, 150);
+  ctx.fillText(t(`Your ${d.year} in Vidra`).toUpperCase(), 80, 150);
   ctx.globalAlpha = 1;
   ctx.font = display(230);
   ctx.fillText(fmtHours(d.totalSecs), 72, 380);
@@ -122,7 +122,7 @@ export async function makeStatsCard(d) {
   // footer
   ctx.fillStyle = "#e50914";
   ctx.font = display(64);
-  ctx.fillText("STREAMBERT", 80, H - 70);
+  ctx.fillText("VIDRA", 80, H - 70);
   return c.toDataURL("image/png");
 }
 
@@ -144,7 +144,7 @@ function wrap(ctx, text, x, y, maxW, lh, maxLines) {
 export async function shareStatsCard(d) {
   const url = await makeStatsCard(d);
   const name = `streambert-${d.year}.png`;
-  if (window.electron?.shareImage) return window.electron.shareImage({ dataUrl: url, name, text: t(`Your ${d.year} in Streambert`) });
+  if (window.electron?.shareImage) return window.electron.shareImage({ dataUrl: url, name, text: t(`Your ${d.year} in Vidra`) });
   if (window.electron?.saveImage) return window.electron.saveImage({ dataUrl: url, name });
   const a = document.createElement("a");
   a.href = url;

@@ -49,12 +49,12 @@ jobs:
         run: |
           mkdir -p out/Payload
           cp -R ios/App/build/Build/Products/Release-iphoneos/App.app out/Payload/
-          cd out && zip -qry "Streambert-iOS-${{ steps.ver.outputs.version }}.ipa" Payload
+          cd out && zip -qry "Vidra-iOS-${{ steps.ver.outputs.version }}.ipa" Payload
           ls -la
 
       - uses: actions/upload-artifact@v4
         with:
-          name: Streambert-iOS-${{ steps.ver.outputs.version }}
+          name: Vidra-iOS-${{ steps.ver.outputs.version }}
           path: out/*.ipa
 
       - name: Build log
@@ -67,9 +67,9 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           NOTES=release-notes/${GITHUB_REF_NAME}.md
-          [ -f "$NOTES" ] || { echo "Streambert iOS ${{ steps.ver.outputs.version }}" > /tmp/notes.md; NOTES=/tmp/notes.md; }
+          [ -f "$NOTES" ] || { echo "Vidra iOS ${{ steps.ver.outputs.version }}" > /tmp/notes.md; NOTES=/tmp/notes.md; }
           if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
             gh release upload "$GITHUB_REF_NAME" out/*.ipa --clobber
           else
-            gh release create "$GITHUB_REF_NAME" out/*.ipa --title "Streambert iOS ${{ steps.ver.outputs.version }}" --notes-file "$NOTES"
+            gh release create "$GITHUB_REF_NAME" out/*.ipa --title "Vidra iOS ${{ steps.ver.outputs.version }}" --notes-file "$NOTES"
           fi

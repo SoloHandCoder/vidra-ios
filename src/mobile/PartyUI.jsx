@@ -97,7 +97,7 @@ const mediaLabel = (m) => (m ? `${m.title || ""}${m.media_type === "tv" && m.sea
 
 async function shareInvite(code) {
   const link = inviteLink(code);
-  const text = `Join my Streambert watch party! ${link}\nOr open Streambert → Watch party → Join and enter ${code}`;
+  const text = `Join my Vidra watch party! ${link}\nOr open Vidra → Watch party → Join and enter ${code}`;
   if (window.electron?.shareText) {
     try {
       await window.electron.shareText({ text });
@@ -259,7 +259,7 @@ export function PartyDock() {
       {!p ? (
         <div className="sbpt-body">
           <div className="sbx-muted" style={{ lineHeight: 1.6, marginBottom: 12 }}>
-            Watch together: play, pause and jumping stay in sync, and you can chat. Everyone needs Streambert and the same
+            Watch together: play, pause and jumping stay in sync, and you can chat. Everyone needs Vidra and the same
             source. Messages are end-to-end encrypted with the party code.
           </div>
           <label className="sbpt-label">Your name</label>

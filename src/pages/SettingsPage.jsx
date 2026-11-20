@@ -232,7 +232,7 @@ function ResetConfirmDialog({ onConfirm, onCancel }) {
             marginBottom: 10,
           }}
         >
-          RESET STREAMBERT?
+          RESET VIDRA?
         </div>
         <div
           style={{
@@ -1829,7 +1829,7 @@ function StartPageSection() {
           lineHeight: 1.6,
         }}
       >
-        Choose which page opens when you launch Streambert.
+        Choose which page opens when you launch Vidra.
       </div>
       <div
         style={{
@@ -1867,7 +1867,7 @@ function AppLanguageSection() {
     <div style={{ marginBottom: 40 }}>
       <div className="settings-section-title">App language</div>
       <div style={{ fontSize: 13, color: "var(--text3)", marginBottom: 12, lineHeight: 1.6 }}>
-        Language of Streambert's menus and buttons. Movie and show info uses the metadata language below.
+        Language of Vidra's menus and buttons. Movie and show info uses the metadata language below.
       </div>
       <SettingsSelect
         value={v}
@@ -2489,7 +2489,7 @@ function DiscordRpcSection() {
         />
         <ToggleRow
           label="Show cover art"
-          description="Uses the movie/show poster as the large image. When off, only the Streambert icon is shown."
+          description="Uses the movie/show poster as the large image. When off, only the Vidra icon is shown."
           value={showCover}
           onChange={setShowCover}
           disabled={!enabled}
@@ -2503,7 +2503,7 @@ function DiscordRpcSection() {
         />
         <ToggleRow
           label="Show GitHub button"
-          description="Adds a button linking to the Streambert GitHub repository."
+          description="Adds a button linking to the Vidra GitHub repository."
           value={showButton}
           onChange={setShowButton}
           disabled={!enabled}
@@ -3624,7 +3624,7 @@ export default function SettingsPage({
       {showDeleteDlConfirm && (
         <ConfirmDialog
           title="DELETE ALL DOWNLOADS?"
-          description="This will permanently delete all video files downloaded through Streambert and remove them from the download list."
+          description="This will permanently delete all video files downloaded through Vidra and remove them from the download list."
           confirmLabel="Yes, Delete All"
           onConfirm={async () => {
             setShowDeleteDlConfirm(false);
@@ -3666,7 +3666,7 @@ export default function SettingsPage({
           SETTINGS
         </div>
         <div style={{ color: "var(--text3)", fontSize: 14, marginBottom: 48 }}>
-          App configuration for Streambert
+          App configuration for Vidra
         </div>
 
         {/* ══════════════════════════════════════════════════════════════════ */}
@@ -4280,7 +4280,7 @@ export default function SettingsPage({
               }}
             >
               Downloaded videos will be saved here. Make sure the folder exists
-              and Streambert has write access to it.
+              and Vidra has write access to it.
             </div>
             <div
               style={{
@@ -4414,7 +4414,7 @@ export default function SettingsPage({
             <div style={{ padding: "22px 24px" }}>
               <CleanRow
                 title="Install Location"
-                description="Opens the folder where Streambert is installed."
+                description="Opens the folder where Vidra is installed."
                 buttonLabel="Open Folder"
                 onAction={async () => {
                   const p = await window.electron?.getInstallPath?.();
@@ -4460,7 +4460,7 @@ export default function SettingsPage({
             <div style={{ padding: "22px 24px" }}>
               <CleanRow
                 title="Delete All Downloads"
-                description="Permanently deletes all video files that were downloaded through Streambert and removes them from the download list. Only files downloaded through the app will be deleted, nothing else in your folder is touched."
+                description="Permanently deletes all video files that were downloaded through Vidra and removes them from the download list. Only files downloaded through the app will be deleted, nothing else in your folder is touched."
                 buttonLabel="Delete All"
                 onAction={() =>
                   new Promise((resolve) => {
@@ -4526,7 +4526,7 @@ export default function SettingsPage({
                       lineHeight: 1.6,
                     }}
                   >
-                    Completely resets Streambert to factory defaults, clears all
+                    Completely resets Vidra to factory defaults, clears all
                     settings, API Token, saved library, watch history/progress,
                     and all cached data. Your downloaded video files will not be
                     touched.

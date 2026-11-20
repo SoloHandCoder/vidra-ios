@@ -1,4 +1,4 @@
-/* Streambert in-app player (public/sb-player.html).
+/* Vidra in-app player (public/sb-player.html).
  * URL params: src, title, t, key, sub, subs (JSON [{url,label,lang}]), close=1, cast=1, type=hls|mp4
  * Talks to the host page with window.parent.postMessage({ __sb: "player", cmd, ... }, "*").
  */

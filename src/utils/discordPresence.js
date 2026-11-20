@@ -30,7 +30,7 @@ function baseAssets(posterUrl, settings) {
   if (settings.showCover && posterUrl) {
     assets.large_image = posterUrl;
     assets.small_image = APP_ICON_URL;
-    assets.small_text = "Streambert";
+    assets.small_text = "Vidra";
   } else {
     assets.large_image = APP_ICON_URL;
   }
@@ -56,11 +56,11 @@ export function sendWatchingActivity(info, settings) {
 
   const activity = {
     type: 3, // "Watching"
-    details: info.title?.slice(0, 128) || "Streambert",
-    state: (info.subtitle || "Streambert").slice(0, 128),
+    details: info.title?.slice(0, 128) || "Vidra",
+    state: (info.subtitle || "Vidra").slice(0, 128),
     assets: {
       ...baseAssets(info.posterUrl, settings),
-      large_text: info.title?.slice(0, 128) || "Streambert",
+      large_text: info.title?.slice(0, 128) || "Vidra",
     },
   };
   if (settings.showTimestamp && info.startedAt) {
@@ -79,7 +79,7 @@ export function sendIdleActivity(settings) {
   const activity = {
     type: 3,
     details: "Idling",
-    assets: { large_image: APP_ICON_URL, large_text: "Streambert" },
+    assets: { large_image: APP_ICON_URL, large_text: "Vidra" },
   };
   const btns = buttons(settings);
   if (btns) activity.buttons = btns;

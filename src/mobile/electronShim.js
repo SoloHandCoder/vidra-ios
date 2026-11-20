@@ -165,7 +165,7 @@ async function castStream({ url, title, startTime = 0, isLocal = false, subtitle
   try {
     res = await castMedia({
       url,
-      title: title || document.querySelector(".main .detail-title")?.textContent?.trim() || "Streambert",
+      title: title || document.querySelector(".main .detail-title")?.textContent?.trim() || "Vidra",
       referer: isLocal ? undefined : refererFor(url) || undefined,
       startTime: Math.floor(startTime || getPlaybackState().position || 0),
       subtitleUrl: subtitleUrl || undefined,
@@ -432,7 +432,7 @@ const electron = {
     return P.shareImage({ base64: b64, name: name || "streambert.png", text: text || "" });
   },
   shareText: async ({ text, title }) => P.shareText({ text: String(text || ""), title: title || "Share" }),
-  verifyUser: async (title) => !!(await P.verifyUser({ title: title || "Streambert" }))?.ok,
+  verifyUser: async (title) => !!(await P.verifyUser({ title: title || "Vidra" }))?.ok,
   networkInfo: async () => {
     try {
       return await P.networkInfo();
@@ -470,7 +470,7 @@ const electron = {
   },
   getInstallPath: async () => (await pathsReady).files,
   openStreamExternal: safe(async ({ url, title }) => {
-    return P.openInPlayer({ url, title: title || "Streambert" });
+    return P.openInPlayer({ url, title: title || "Vidra" });
   }),
   pruneSubtitlePaths: safe((id) => subs.pruneSubtitlePaths(id)),
 
@@ -575,7 +575,7 @@ const electron = {
     document.documentElement.style.zoom = String(factor);
   },
 
-  // ── updates: .ipa from github.com/SoloHandCoder/streambert-ios releases (opens the release page) ──
+  // ── updates: .ipa from github.com/SoloHandCoder/vidra-ios releases (opens the release page) ──
   detectUpdateFormat: async () => "ipa",
   downloadAndInstallUpdate: safe(async ({ url }) => P.installUpdate({ url })),
   cancelUpdate: async () => { try { await P.cancelUpdate(); } catch {} },

@@ -510,7 +510,7 @@ function StatsPage({ apiKey, onClose, onSelect }) {
         )}
 
         <div className="sbx-recap">
-          <div className="sbx-recap-kicker">Your {year} in Streambert</div>
+          <div className="sbx-recap-kicker">Your {year} in Vidra</div>
           <div className="sbx-recap-big">{fmtHours(y.total)}</div>
           <div className="sbx-recap-sub">
             watched across {yearTitles.length} title{yearTitles.length === 1 ? "" : "s"}

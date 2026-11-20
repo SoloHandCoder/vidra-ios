@@ -1,4 +1,4 @@
-// App shortcuts (long-press the icon) and links shared / opened with Streambert.
+// App shortcuts (long-press the icon) and links shared / opened with Vidra.
 //   streambert://open/search | downloads | continue | library | settings
 //   https://www.themoviedb.org/movie/550-fight-club, .../tv/1399
 //   https://www.imdb.com/title/tt0137523/   (resolved through TMDB /find)
@@ -44,7 +44,7 @@ export function parseLink(text) {
 async function openTitle(link) {
   const apiKey = await secureStorage.get("apikey");
   if (!apiKey) {
-    toast("Add your TMDB token in Streambert first, then try again");
+    toast("Add your TMDB token in Vidra first, then try again");
     return;
   }
   let type = link.type, id = link.id;
@@ -71,6 +71,7 @@ async function openTitle(link) {
 }
 
 async function handle(text) {
+  if (text) text = String(text).replace(/^vidra:\/\//i, "streambert://"); // new link name, same links
   if (!text) return;
   if (!(await waitForApp())) return;
   const nav = window.__sbNav;

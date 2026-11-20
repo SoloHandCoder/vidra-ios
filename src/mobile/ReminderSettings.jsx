@@ -43,7 +43,7 @@ export default function ReminderSettings() {
           <div style={{ fontSize: 14, fontWeight: 500, color: "var(--text)" }}>Remind me on release day</div>
           <div style={{ fontSize: 12, color: "var(--text3)", marginTop: 2, lineHeight: 1.5 }}>
             A notification on the day a new episode of a show you saved or watch comes out.
-            {!window.electron?.isMobile && " Shown while Streambert is open (or when you open it that day)."}
+            {!window.electron?.isMobile && " Shown while Vidra is open (or when you open it that day)."}
           </div>
         </div>
       </div>

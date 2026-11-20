@@ -56,7 +56,7 @@ function Row({ title, desc, children }) {
 }
 
 const LOCATIONS = [
-  { id: "app", label: "App storage", desc: "Private to Streambert. Removed if you uninstall the app." },
+  { id: "app", label: "App storage", desc: "Private to Vidra. Removed if you uninstall the app." },
   { id: "movies", label: "Movies folder", desc: "Movies/Streambert on your phone: shows up in your gallery, VLC and file manager." },
   { id: "custom", label: "Choose folder…", desc: "Any folder, including an SD card." },
 ];

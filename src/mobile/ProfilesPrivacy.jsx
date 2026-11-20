@@ -296,7 +296,7 @@ export default function ProfilesPrivacy() {
               onChange={(v) => setLockOpt({ enabled: v })}
             />
             <div>
-              <div style={{ fontSize: 14, fontWeight: 500, color: "var(--text)" }}>Lock Streambert</div>
+              <div style={{ fontSize: 14, fontWeight: 500, color: "var(--text)" }}>Lock Vidra</div>
               <div style={{ fontSize: 12, color: "var(--text3)", marginTop: 2, lineHeight: 1.5 }}>
                 {lock.available
                   ? "Unlock with your fingerprint, face or your phone's PIN / pattern."
@@ -330,7 +330,7 @@ export default function ProfilesPrivacy() {
         className="btn btn-secondary"
         onClick={async () => {
           const r = await P.pinWidget().catch(() => ({ ok: false }));
-          if (!r?.ok) flash("Long-press your home screen → Widgets → Streambert to add it.");
+          if (!r?.ok) flash("Long-press your home screen → Widgets → Vidra to add it.");
         }}
       >
         Add widget to home screen

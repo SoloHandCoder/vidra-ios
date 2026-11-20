@@ -4,7 +4,7 @@
 // Supports multiple release sources (GitHub + Codeberg).
 
 // iOS port: updates come from the iOS repo's releases (.ipa assets)
-export const GITHUB_REPO = "SoloHandCoder/streambert-ios";
+export const GITHUB_REPO = "SoloHandCoder/vidra-ios";
 
 // ── Source registry ───────────────────────────────────────────────────────────
 // Each entry just describes *where* to fetch from and how to build the

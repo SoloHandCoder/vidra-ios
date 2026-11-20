@@ -1,4 +1,4 @@
-// iOS side of the app's native plugin ("Streambert"). Same method names as the
+// iOS side of the app's native plugin ("Vidra"). Same method names as the
 // Android plugin (StreambertPlugin.java) so the shared JS works unchanged.
 // What's not possible / not built on iOS yet resolves with a harmless default
 // (downloads, Chromecast, widgets, background episode checks, voice search).
@@ -27,7 +27,7 @@ public class StreambertPlugin: CAPPlugin, CAPBridgedPlugin, UNUserNotificationCe
         "cancelUpdate",
     ].map { CAPPluginMethod(name: $0, returnType: CAPPluginReturnPromise) }
 
-    static let releasesPage = "https://github.com/SoloHandCoder/streambert-ios/releases/latest"
+    static let releasesPage = "https://github.com/SoloHandCoder/vidra-ios/releases/latest"
 
     // ───────────── links opened with the app (streambert://…) ─────────────
     private static var pendingIncoming: String?
@@ -324,7 +324,7 @@ public class StreambertPlugin: CAPPlugin, CAPBridgedPlugin, UNUserNotificationCe
 
     @objc func showNotification(_ call: CAPPluginCall) {
         let c = UNMutableNotificationContent()
-        c.title = call.getString("title") ?? "Streambert"
+        c.title = call.getString("title") ?? "Vidra"
         c.body = call.getString("body") ?? ""
         if let url = call.getString("url") { c.userInfo = ["url": url] }
         withPermission { ok in
@@ -374,7 +374,7 @@ public class StreambertPlugin: CAPPlugin, CAPBridgedPlugin, UNUserNotificationCe
 
     // ───────────── app lock / identity ─────────────
     @objc func verifyUser(_ call: CAPPluginCall) {
-        AppLockController.authenticate(reason: call.getString("title") ?? "Streambert") { ok in call.resolve(["ok": ok]) }
+        AppLockController.authenticate(reason: call.getString("title") ?? "Vidra") { ok in call.resolve(["ok": ok]) }
     }
 
     @objc func getLockSettings(_ call: CAPPluginCall) {
@@ -466,7 +466,7 @@ final class AppLockController {
     private func unlock() {
         guard !authenticating else { return }
         authenticating = true
-        AppLockController.authenticate(reason: "Unlock Streambert") { [weak self] ok in
+        AppLockController.authenticate(reason: "Unlock Vidra") { [weak self] ok in
             self?.authenticating = false
             if ok { self?.hideCover() }
         }
@@ -478,7 +478,7 @@ final class AppLockController {
         v.autoresizingMask = [.flexibleWidth, .flexibleHeight]
         v.backgroundColor = UIColor(red: 0.04, green: 0.04, blue: 0.04, alpha: 1)
         let b = UIButton(type: .system)
-        b.setTitle("Unlock Streambert", for: .normal)
+        b.setTitle("Unlock Vidra", for: .normal)
         b.setTitleColor(.white, for: .normal)
         b.titleLabel?.font = .boldSystemFont(ofSize: 17)
         b.backgroundColor = UIColor(red: 0.9, green: 0.04, blue: 0.08, alpha: 1)

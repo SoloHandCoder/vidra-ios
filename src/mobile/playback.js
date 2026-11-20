@@ -40,17 +40,17 @@ function activeFrame() {
 function currentTitle(frame) {
   if (frame?.hasAttribute("data-sb-local-player")) {
     try {
-      return new URL(frame.src).searchParams.get("title") || "Streambert";
+      return new URL(frame.src).searchParams.get("title") || "Vidra";
     } catch {}
   }
   const t = document.querySelector(".main .detail-title")?.textContent?.trim();
-  return t || "Streambert";
+  return t || "Vidra";
 }
 
 function currentSubtitle() {
   // TV page: active episode label if present
   const ep = document.querySelector(".episode-item.active .episode-title, .ep-card--active .ep-card__title");
-  return ep?.textContent?.trim() || "Streambert";
+  return ep?.textContent?.trim() || "Vidra";
 }
 
 let last = { active: false, playing: false };

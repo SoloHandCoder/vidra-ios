@@ -1,5 +1,5 @@
 /* ═══════════════════════════════════════════════════════════════════════════
-   Streambert Mobile: phone layout layer
+   Vidra Mobile: phone layout layer
    ---------------------------------------------------------------------------
    Loaded after global.css. Everything that changes layout is scoped under
    html[data-mobile] (set by the mobile shim at startup), so the desktop

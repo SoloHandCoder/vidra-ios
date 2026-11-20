@@ -55,11 +55,11 @@ export const prettyCode = (c) => {
   return s.length > 5 ? `${s.slice(0, 5)}-${s.slice(5)}` : s;
 };
 
-/** the link that opens Streambert straight into this party */
-export const inviteLink = (code) => `streambert://party/${prettyCode(code)}`;
+/** the link that opens Vidra straight into this party */
+export const inviteLink = (code) => `vidra://party/${prettyCode(code)}`;
 /** party code from an invite link / text, or null */
 export function codeFromLink(text) {
-  const m = String(text || "").match(/(?:streambert:\/\/party\/|[?#&]party=|\/join\/?#)([A-Za-z0-9]{5}-?[A-Za-z0-9]{5})/);
+  const m = String(text || "").match(/(?:(?:streambert|vidra):\/\/party\/|[?#&]party=|\/join\/?#)([A-Za-z0-9]{5}-?[A-Za-z0-9]{5})/);
   return m ? prettyCode(m[1]) : null;
 }
 
