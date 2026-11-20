@@ -74,9 +74,20 @@ export function refreshGoal(d) {
   save(g);
 }
 
+let watchedCache = { raw: null, map: {} };
 function watchedMap() {
-  const w = storage.get("watched");
-  return w && typeof w === "object" ? w : {};
+  let raw = null;
+  try {
+    raw = localStorage.getItem("streambert_watched");
+  } catch {}
+  if (raw !== watchedCache.raw) {
+    let w = null;
+    try {
+      w = raw ? JSON.parse(raw) : null;
+    } catch {}
+    watchedCache = { raw, map: w && typeof w === "object" ? w : {} };
+  }
+  return watchedCache.map;
 }
 
 /** where a show stands against a plan + deadline */

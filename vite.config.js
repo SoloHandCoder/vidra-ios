@@ -16,12 +16,9 @@ export default defineConfig(({ mode }) => {
       },
       rollupOptions: {
         output: {
-          manualChunks: {
-            react: ["react", "react-dom"],
-            settings: ["./src/pages/SettingsPage"],
-            movie: ["./src/pages/MoviePage"],
-            tv: ["./src/pages/TVPage"],
-            downloads: ["./src/pages/DownloadsPage"],
+          // pages are lazy() in App.jsx and split by themselves; only React gets its own chunk
+          manualChunks(id) {
+            if (/node_modules[\\/](react|react-dom|scheduler)[\\/]/.test(id)) return "react";
           },
         },
       },

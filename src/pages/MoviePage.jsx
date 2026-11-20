@@ -577,6 +577,10 @@ export default function MoviePage({
 
     // Poll for a B-button "leave the player" request from the guest script.
     const exitPoll = setInterval(async () => {
+      // no controller connected → nothing to check (saves a frame round trip 4× a second)
+      try {
+        if (![...(navigator.getGamepads?.() || [])].some(Boolean)) return;
+      } catch {}
       try {
         const requested = await wv.executeJavaScript(GAMEPAD_EXIT_CHECK_JS);
         if (requested) {

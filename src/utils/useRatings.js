@@ -89,6 +89,13 @@ export function useRatings(items) {
     if (!missing.length) return;
 
     let cancelled = false;
+    let batch = {};
+    const flush = () => {
+      if (!Object.keys(batch).length) return;
+      const b = batch;
+      batch = {};
+      setRatingsMap((prev) => ({ ...prev, ...b }));
+    };
     (async () => {
       for (let i = 0; i < missing.length; i++) {
         if (cancelled) break;
@@ -101,25 +108,32 @@ export function useRatings(items) {
             type === "tv"
               ? await fetchTVRating(item.id, apiKey, ratingCountry)
               : await fetchMovieRating(item.id, apiKey, ratingCountry);
+          cache[cacheKey] = {
+            cert: result.cert,
+            minAge: result.minAge,
+            ts: Date.now(),
+          };
+          cacheModified = true;
           if (!cancelled) {
-            cache[cacheKey] = {
-              cert: result.cert,
-              minAge: result.minAge,
-              ts: Date.now(),
-            };
-            cacheModified = true;
-            setRatingsMap((prev) => ({ ...prev, [mapKey]: result }));
+            batch[mapKey] = result;
+            // show results in small groups instead of re-rendering for every title
+            if (Object.keys(batch).length >= 8 || i === missing.length - 1) flush();
           }
         } catch {}
         // Avoid "hammering" TMDB
         if (i < missing.length - 1) await new Promise((r) => setTimeout(r, 80));
       }
       // Write cache once at the end instead of after each item
-      if (cacheModified && !cancelled) writeCache(cache);
+      if (!cancelled) flush();
+      if (cacheModified) writeCache(cache);
+      cacheModified = false;
     })();
 
     return () => {
       cancelled = true;
+      // keep what was already fetched for the next visit
+      if (cacheModified) writeCache(cache);
+      cacheModified = false;
     };
   }, [itemsKey, apiKey, ratingCountry]);
 

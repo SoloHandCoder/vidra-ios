@@ -252,3 +252,5 @@ html[data-mobile] .sbpt-code-row .btn { flex: 1; justify-content: center; }
 .sbpt-poll-label { position: relative; flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .sbpt-poll-n { position: relative; color: var(--text3); font-variant-numeric: tabular-nums; }
 .sbpt-poll-form .sbx-input { font-size: 13px; }
+html[data-theme-kind="light"] .sbpt-host-tag { color: #9a6a00; }
+html[data-theme-kind="light"] .sbpt-member.host { border-color: #c99a1a; }

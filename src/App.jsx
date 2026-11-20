@@ -456,6 +456,32 @@ export default function App() {
     };
   }, []);
 
+  const pendingDl = useRef(new Map());
+  const dlTimer = useRef(null);
+  const flushDl = useCallback(() => {
+    clearTimeout(dlTimer.current);
+    dlTimer.current = null;
+    const batch = pendingDl.current;
+    if (!batch.size) return;
+    pendingDl.current = new Map();
+    setDownloads((prev) => {
+      let next = prev;
+      for (const update of batch.values()) {
+        const idx = next.findIndex((d) => d.id === update.id);
+        if (idx === -1) {
+          // Unknown id: either the entry was deleted (stale event after SIGKILL)
+          // or a genuine race on first event.
+          if (!update.name) continue;
+          next = [update, ...next];
+          continue;
+        }
+        if (next === prev) next = [...prev];
+        next[idx] = { ...next[idx], ...update };
+      }
+      return next;
+    });
+  }, []);
+
   // Listen for live progress events from main process
   useEffect(() => {
     if (!window.electron) return;
@@ -473,21 +499,20 @@ export default function App() {
         });
       }
 
-      setDownloads((prev) => {
-        const idx = prev.findIndex((d) => d.id === update.id);
-        if (idx === -1) {
-          // Unknown id: either the entry was deleted (stale event after SIGKILL)
-          // or a genuine race on first event.
-          if (!update.name) return prev;
-          return [update, ...prev];
-        }
-        const updated = [...prev];
-        updated[idx] = { ...updated[idx], ...update };
-        return updated;
-      });
+      // progress arrives several times a second per download: collect it and
+      // re-render the app at most once a second (status changes go through at once)
+      const known = pendingDl.current.get(update.id);
+      pendingDl.current.set(update.id, known ? { ...known, ...update } : update);
+      const urgent = update.status && update.status !== "downloading";
+      if (urgent) flushDl();
+      else if (!dlTimer.current) dlTimer.current = setTimeout(flushDl, 1000);
     });
-    return () => window.electron.offDownloadProgress(handler);
-  }, []);
+    return () => {
+      window.electron.offDownloadProgress(handler);
+      clearTimeout(dlTimer.current);
+      dlTimer.current = null;
+    };
+  }, [flushDl]);
 
   const handleDownloadStarted = useCallback((newEntry) => {
     setDownloads((prev) => {
@@ -1139,7 +1164,7 @@ export default function App() {
                   fontSize: 15,
                 }}
               >
-                Laden…
+                Loading…
               </div>
             }
           >

@@ -271,7 +271,7 @@ export default function HomePage({
           <div
             className="hero-bg"
             style={{
-              backgroundImage: `url(${imgUrl(hero.backdrop_path, "original")})`,
+              backgroundImage: `url(${imgUrl(hero.backdrop_path, window.innerWidth < 900 ? "w780" : "w1280")})`,
             }}
           />
           <div className="hero-gradient" />
@@ -322,7 +322,7 @@ export default function HomePage({
                   const restr = itemRestricted(item);
                   return (
                     <MediaCard
-                      key={`${item.media_type}_${item.id}`}
+                      key={pk}
                       item={item}
                       onClick={() => onSelect(item)}
                       progress={progress[pk] || 0}

@@ -37,7 +37,7 @@ export function getParty() {
     control: S.control,
     canControl: canControl(),
     queue: S.queue.slice(),
-    ready: S.ready ? { id: S.ready.id, media: S.ready.media, ids: [...S.ready.ids], meReady: S.ready.ids.has(S.me) } : null,
+    ready: S.ready ? { id: S.ready.id, media: S.ready.media, ids: [...S.ready.ids].filter((id) => S.members.has(id)), meReady: S.ready.ids.has(S.me) } : null,
     poll: pollView(),
   };
 }
@@ -78,9 +78,9 @@ async function derive(code) {
   const topic = "sbparty/" + [...new Uint8Array(bits)].map((b) => b.toString(16).padStart(2, "0")).join("");
   return { key, topic };
 }
-async function seal(obj) {
+async function seal(obj, s = S) {
   const iv = crypto.getRandomValues(new Uint8Array(12));
-  const ct = new Uint8Array(await crypto.subtle.encrypt({ name: "AES-GCM", iv }, S.key, new TextEncoder().encode(JSON.stringify(obj))));
+  const ct = new Uint8Array(await crypto.subtle.encrypt({ name: "AES-GCM", iv }, s.key, new TextEncoder().encode(JSON.stringify(obj))));
   const out = new Uint8Array(12 + ct.length);
   out.set(iv);
   out.set(ct, 12);
@@ -93,14 +93,22 @@ async function open(buf) {
 }
 
 function send(msg) {
-  if (!S?.client?.connected) return;
-  const extra = isHost() ? { ctl: S.control } : {};
-  seal({ ...msg, ...extra, from: S.me, name: S.name, host: isHost(), joinedAt: S.joinedAt, at: Date.now() })
-    .then((data) => S?.client?.publish(S.topic, data, { qos: 0 }))
+  const s = S; // the session this message belongs to (it may have ended by the time it's sealed)
+  if (!s?.client?.connected) return Promise.resolve();
+  const extra = isHost() ? { ctl: s.control } : {};
+  return seal({ ...msg, ...extra, from: s.me, name: s.name, host: isHost(), joinedAt: s.joinedAt, at: Date.now() }, s)
+    .then((data) => s.client.publish(s.topic, data, { qos: 0 }))
     .catch(() => {});
 }
 // the host's regular "I'm here" also carries the queue so late joiners get it
-const ping = () => send({ type: "ping", media: S?.media, state: S?.lastState || null, ...(isHost() ? { queue: S.queue } : {}) });
+const ping = () =>
+  send({
+    type: "ping",
+    media: S?.media,
+    state: S?.lastState || null,
+    // late joiners / reconnects get the queue and a running ready check
+    ...(isHost() ? { queue: S.queue, ready: S.ready ? { id: S.ready.id, media: S.ready.media, t: S.ready.t } : null } : {}),
+  });
 
 async function connect(broker) {
   const { default: mqtt } = await import("mqtt");
@@ -110,15 +118,18 @@ async function connect(broker) {
       client.end(true);
       reject(new Error("timeout"));
     }, 9000);
-    client.once("connect", () => {
-      clearTimeout(t);
-      resolve(client);
-    });
-    client.once("error", (e) => {
+    const onError = (e) => {
       clearTimeout(t);
       client.end(true);
       reject(e);
+    };
+    client.once("connect", () => {
+      clearTimeout(t);
+      client.removeListener("error", onError);
+      client.on("error", () => {}); // later errors (slow reconnects): mqtt.js retries by itself
+      resolve(client);
     });
+    client.once("error", onError);
   });
 }
 
@@ -152,14 +163,22 @@ export async function joinParty(code, name) {
   S.host = starting ? S.me : null;
   S.members.set(S.me, { id: S.me, name: S.name, joinedAt: S.joinedAt, me: true });
   emit();
+  const mine = S;
   let client = null;
   for (const b of BROKERS) {
     try {
       client = await connect(b);
       break;
     } catch {}
+    if (S !== mine) break;
   }
-  if (!S) return null;
+  if (S !== mine) {
+    // left, or joined another party, while this one was still connecting
+    try {
+      client?.end(true);
+    } catch {}
+    return null;
+  }
   if (!client) {
     S = null;
     emit();
@@ -184,11 +203,18 @@ export async function joinParty(code, name) {
   client.subscribe(S.topic, { qos: 0 });
   send({ type: "hello", media: S.media });
   S.ping = setInterval(() => {
+    if (S !== mine) return clearInterval(mine.ping);
     ping();
     // members that went quiet are gone
     const now = Date.now();
     for (const [id, m] of S.members) if (!m.me && now - (m.seenAt || 0) > 45000) S.members.delete(id);
     if (S.host && !S.members.has(S.host)) hostLeft();
+    // nobody hosts (everyone joined by code): after a moment the longest-present member takes over
+    if (!S.host) {
+      S.noHost = (S.noHost || 0) + 1;
+      if (S.noHost >= 2) hostLeft();
+    } else S.noHost = 0;
+    if (S.ready) checkAllReady(); // someone who left must not block the ready check
     emit();
   }, 15000);
   emit();
@@ -198,15 +224,18 @@ export async function joinParty(code, name) {
 export async function leaveParty() {
   if (!S) return;
   const s = S;
-  send({ type: "bye" });
+  const bye = send({ type: "bye" });
   clearInterval(s.ping);
   clearTimeout(s.goTimer);
   S = null;
-  setTimeout(() => {
-    try {
-      s.client?.end(true);
-    } catch {}
-  }, 300);
+  // disconnect only after "bye" went out, so the others see us leave right away
+  Promise.resolve(bye).finally(() =>
+    setTimeout(() => {
+      try {
+        s.client?.end(true);
+      } catch {}
+    }, 300),
+  );
   emit();
 }
 
@@ -388,7 +417,8 @@ function pollView() {
   const P = S.poll;
   if (!P) return null;
   const counts = P.options.map(() => 0);
-  for (const [id, i] of Object.entries(P.votes)) if (S.members.has(id) && counts[i] != null) counts[i]++;
+  // while it runs only people still here count; a finished poll keeps its result
+  for (const [id, i] of Object.entries(P.votes)) if ((P.closed || S.members.has(id)) && counts[i] != null) counts[i]++;
   const total = counts.reduce((a, b) => a + b, 0);
   const top = Math.max(0, ...counts);
   return {
@@ -464,6 +494,13 @@ function onMessage(m) {
     if (m.ctl === "all" || m.ctl === "host") S.control = m.ctl;
     if (Array.isArray(m.queue)) S.queue = m.queue.map(cleanItem).filter(Boolean).slice(0, 30);
     if (m.state && sameMedia(m.media, S.media)) S.hostState = { playing: !!m.state.playing, t: Number(m.state.t) || 0, at: Date.now() };
+    // a ready check that started before we joined / while we were reconnecting
+    if (m.type === "ping" && "ready" in m) {
+      if (m.ready && S.ready?.id !== String(m.ready.id)) {
+        S.ready = { id: String(m.ready.id), media: m.ready.media || null, t: Number(m.ready.t) || 0, ids: new Set([m.from]) };
+        window.dispatchEvent(new CustomEvent("streambert:party-ready-check", { detail: { name: m.name } }));
+      } else if (!m.ready && S.ready) S.ready = null;
+    }
   }
   if (m.media) S.remoteMedia = { ...m.media, by: m.name };
   switch (m.type) {
@@ -492,7 +529,7 @@ function onMessage(m) {
       if (!sameMedia(m.media, S.media)) break; // they're watching something else
       if (S.control === "host" && S.host && !fromHost) break; // only the host controls playback
       {
-        const t = Number(m.t) + (m.playing ? Math.max(0, (Date.now() - m.at) / 1000) : 0);
+        const t = Number(m.t) + (m.playing ? Math.min(2, Math.max(0, (Date.now() - m.at) / 1000)) : 0);
         if (fromHost) S.hostState = { playing: !!m.playing, t, at: Date.now() };
         apply({ playing: !!m.playing, t });
       }

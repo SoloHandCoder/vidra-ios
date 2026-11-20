@@ -106,7 +106,19 @@ let intercepting = false;
 let lastFrame = null;
 let pip = false;
 
+let polling = false;
 async function poll() {
+  if (polling) return; // the previous check is still waiting on a slow player frame
+  if (document.hidden && !last.playing) return; // in the background with nothing playing
+  polling = true;
+  try {
+    await pollOnce();
+  } finally {
+    polling = false;
+  }
+}
+
+async function pollOnce() {
   const frame = activeFrame();
   let state = null;
   if (frame) {
