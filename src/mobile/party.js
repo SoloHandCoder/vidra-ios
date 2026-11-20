@@ -38,6 +38,7 @@ export function getParty() {
     canControl: canControl(),
     queue: S.queue.slice(),
     ready: S.ready ? { id: S.ready.id, media: S.ready.media, ids: [...S.ready.ids], meReady: S.ready.ids.has(S.me) } : null,
+    poll: pollView(),
   };
 }
 
@@ -144,6 +145,7 @@ export async function joinParty(code, name) {
     control: "host",
     queue: [],
     ready: null,
+    poll: null,
     hostState: null,
   };
   S.joinedAt = Date.now();
@@ -376,6 +378,73 @@ function checkAllReady() {
   }
 }
 
+// ---- polls -----------------------------------------------------------------
+// One poll at a time. Anyone can start one; whoever started it (or the host) ends it.
+const cleanPoll = (q, options) => ({
+  q: String(q || "").trim().slice(0, 120),
+  options: (Array.isArray(options) ? options : []).map((o) => String(o || "").trim().slice(0, 80)).filter(Boolean).slice(0, 6),
+});
+function pollView() {
+  const P = S.poll;
+  if (!P) return null;
+  const counts = P.options.map(() => 0);
+  for (const [id, i] of Object.entries(P.votes)) if (S.members.has(id) && counts[i] != null) counts[i]++;
+  const total = counts.reduce((a, b) => a + b, 0);
+  const top = Math.max(0, ...counts);
+  return {
+    id: P.id,
+    q: P.q,
+    options: P.options,
+    counts,
+    total,
+    myVote: P.votes[S.me] ?? null,
+    byName: P.byName,
+    canEnd: P.by === S.me || isHost(),
+    closed: !!P.closed,
+    winners: total ? counts.map((c, i) => (c === top ? i : -1)).filter((i) => i >= 0) : [],
+    queueKeys: P.queueKeys || null,
+  };
+}
+/** start a poll; queueKeys (optional) ties each option to a queue item */
+export function startPoll(q, options, queueKeys = null) {
+  if (!S || (S.poll && !S.poll.closed)) return false;
+  const c = cleanPoll(q, options);
+  if (!c.q || c.options.length < 2) return false;
+  S.poll = { id: Math.random().toString(36).slice(2, 8), ...c, votes: {}, by: S.me, byName: S.name, queueKeys: Array.isArray(queueKeys) ? queueKeys.slice(0, c.options.length) : null, closed: false };
+  sendPoll();
+  addChat({ sys: true, text: `You started a poll: ${c.q}`, at: Date.now() });
+  emit();
+  return true;
+}
+const sendPoll = () => send({ type: "poll", pid: S.poll.id, q: S.poll.q, options: S.poll.options, votes: S.poll.votes, queueKeys: S.poll.queueKeys });
+export function votePoll(i) {
+  if (!S?.poll || S.poll.closed || S.poll.options[i] == null) return;
+  S.poll.votes[S.me] = i;
+  send({ type: "vote", pid: S.poll.id, i });
+  emit();
+}
+function closePoll(byName) {
+  const P = S.poll;
+  if (!P || P.closed) return;
+  P.closed = true;
+  const v = pollView();
+  const text = v.total ? `${v.winners.map((i) => P.options[i]).join(" / ")} (${v.counts[v.winners[0]]}/${v.total})` : "no votes";
+  addChat({ sys: true, text: `Poll ended${byName ? "" : ""}: ${P.q} → ${text}`, at: Date.now() });
+}
+export function endPoll() {
+  if (!S?.poll || S.poll.closed || !(S.poll.by === S.me || isHost())) return;
+  send({ type: "poll-end", pid: S.poll.id });
+  closePoll();
+  emit();
+}
+/** hide a finished poll */
+export function clearPoll() {
+  if (S?.poll?.closed) {
+    S.poll = null;
+    emit();
+  }
+}
+
 // ---- incoming --------------------------------------------------------------
 let lastBlockedNote = 0;
 
@@ -404,6 +473,7 @@ function onMessage(m) {
         notify({ name: m.name, text: "joined the party", sys: true, host: !!m.host });
       }
       ping(); // let them know we're here
+      if (S.poll && !S.poll.closed && S.poll.by === S.me) sendPoll(); // late joiners see the running poll
       break;
     case "bye":
       S.members.delete(m.from);
@@ -469,6 +539,27 @@ function onMessage(m) {
       break;
     case "ready-cancel":
       if (fromHost) S.ready = null;
+      break;
+    case "poll":
+      {
+        const c = cleanPoll(m.q, m.options);
+        if (!c.q || c.options.length < 2) break;
+        const same = S.poll && S.poll.id === String(m.pid);
+        if (S.poll && !S.poll.closed && !same) break; // one poll at a time
+        const votes = same ? S.poll.votes : {};
+        if (m.votes && typeof m.votes === "object") for (const [id, i] of Object.entries(m.votes)) if (Number.isInteger(i) && votes[id] == null) votes[id] = i;
+        if (!same) {
+          addChat({ sys: true, text: `${m.name} started a poll: ${c.q}`, at: Date.now() });
+          notify({ name: m.name, text: `Poll: ${c.q}`, sys: true, host: !!m.host });
+        }
+        S.poll = { id: String(m.pid), ...c, votes, by: m.from, byName: m.name, queueKeys: Array.isArray(m.queueKeys) ? m.queueKeys.map(String).slice(0, c.options.length) : null, closed: same ? S.poll.closed : false };
+      }
+      break;
+    case "vote":
+      if (S.poll && !S.poll.closed && String(m.pid) === S.poll.id && Number.isInteger(m.i) && S.poll.options[m.i] != null) S.poll.votes[m.from] = m.i;
+      break;
+    case "poll-end":
+      if (S.poll && String(m.pid) === S.poll.id && (m.from === S.poll.by || fromHost)) closePoll(m.name);
       break;
     case "go":
       if (fromHost) countdownThenPlay(Number(m.t) || 0, m.media || null);

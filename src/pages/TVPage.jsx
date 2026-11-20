@@ -1705,7 +1705,14 @@ export default function TVPage({
     resetAutoplay,
     autoplayTotal,
     upNextQueue,
-  } = useAutoplay({ nextEp, playEpisode, restricted, partyItem: upNextPartyItem });
+  } = useAutoplay({
+    nextEp,
+    playEpisode,
+    restricted,
+    partyItem: upNextPartyItem,
+    // "Play now" / the countdown: mark the episode you just finished as watched
+    onAdvance: () => currentProgressKey && onMarkWatchedRef.current?.(currentProgressKey),
+  });
 
   // watch party: the host moved everyone to an episode, start it here too
   const partyPlayedRef = useRef(null);

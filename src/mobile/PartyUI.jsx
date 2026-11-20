@@ -5,6 +5,10 @@ import { useEffect, useRef, useState } from "react";
 import {
   addToQueue,
   cancelReadyCheck,
+  clearPoll,
+  endPoll,
+  startPoll,
+  votePoll,
   codeFromLink,
   getParty,
   inviteLink,
@@ -112,6 +116,81 @@ async function shareInvite(code) {
   }
 }
 
+/** the running (or just finished) poll */
+function PollCard({ p }) {
+  const v = p.poll;
+  const winnerKey = v.closed && v.queueKeys && v.winners.length === 1 ? v.queueKeys[v.winners[0]] : null;
+  return (
+    <div className={`sbpt-poll${v.closed ? " closed" : ""}`}>
+      <div className="sbpt-poll-top">
+        <b data-no-i18n>{v.q}</b>
+        <span className="sbx-muted">
+          <span data-no-i18n>{v.byName}</span> · {v.total} <span>{v.total === 1 ? "vote" : "votes"}</span>
+        </span>
+      </div>
+      {v.options.map((o, i) => {
+        const pct = v.total ? Math.round((v.counts[i] / v.total) * 100) : 0;
+        const win = v.closed && v.winners.includes(i);
+        return (
+          <button key={i} className={`sbpt-poll-opt${v.myVote === i ? " mine" : ""}${win ? " win" : ""}`} disabled={v.closed} onClick={() => votePoll(i)}>
+            <span className="sbpt-poll-bar" style={{ transform: `scaleX(${pct / 100})` }} />
+            <span className="sbpt-poll-label" data-no-i18n>
+              {win ? "✓ " : ""}
+              {o}
+            </span>
+            <span className="sbpt-poll-n" data-no-i18n>{v.counts[i]}</span>
+          </button>
+        );
+      })}
+      <div className="sbpt-ready-btns">
+        {!v.closed && v.myVote == null && <span className="sbx-muted">Tap an option to vote</span>}
+        {!v.closed && v.canEnd && <button className="btn btn-secondary btn--sm" onClick={endPoll}>End poll</button>}
+        {winnerKey && p.isHost && p.queue.some((q) => q.key === winnerKey) && (
+          <button className="btn btn-primary btn--sm" onClick={() => (playFromQueue(winnerKey), clearPoll())}>▶ Play the winner</button>
+        )}
+        {v.closed && <button className="btn btn-ghost btn--sm" onClick={clearPoll}>Close</button>}
+      </div>
+    </div>
+  );
+}
+
+/** form to start a poll */
+function PollForm({ p, onDone }) {
+  const [q, setQ] = useState("");
+  const [opts, setOpts] = useState(["", ""]);
+  const [keys, setKeys] = useState(null);
+  const filled = opts.map((o) => o.trim()).filter(Boolean);
+  const set = (i, val) => (setOpts((a) => a.map((o, j) => (j === i ? val : o))), setKeys(null));
+  return (
+    <div className="sbpt-poll sbpt-poll-form">
+      <input className="sbx-input" placeholder="Ask something…" value={q} maxLength={120} onChange={(e) => setQ(e.target.value)} />
+      {opts.map((o, i) => (
+        <input key={i} className="sbx-input" placeholder={`Option ${i + 1}`} value={o} maxLength={80} onChange={(e) => set(i, e.target.value)} />
+      ))}
+      <div className="sbpt-ready-btns">
+        {opts.length < 6 && <button className="btn btn-ghost btn--sm" onClick={() => setOpts((a) => [...a, ""])}>＋ Option</button>}
+        {p.queue.length >= 2 && (
+          <button
+            className="btn btn-ghost btn--sm"
+            onClick={() => {
+              const items = p.queue.slice(0, 6);
+              setQ((x) => x || "What should we watch next?");
+              setOpts(items.map(mediaLabel));
+              setKeys(items.map((it) => it.key));
+            }}
+          >
+            Use the queue
+          </button>
+        )}
+        <button className="btn btn-primary btn--sm" disabled={!q.trim() || filled.length < 2} onClick={() => startPoll(q, filled, keys && filled.length === keys.length ? keys : null) && onDone()}>
+          Start poll
+        </button>
+        <button className="btn btn-ghost btn--sm" onClick={onDone}>Cancel</button>
+      </div>
+    </div>
+  );
+}
+
 /** mounted once by the app */
 export function PartyDock() {
   const p = useParty();
@@ -123,6 +202,7 @@ export function PartyDock() {
   const [text, setText] = useState("");
   const [copied, setCopied] = useState("");
   const [tab, setTab] = useState("chat");
+  const [pollForm, setPollForm] = useState(false);
   const chatRef = useRef(null);
   const [pops, setPops] = useState([]);
   const [readyPop, setReadyPop] = useState(null);
@@ -223,7 +303,7 @@ export function PartyDock() {
           <PartyIcon size={18} />
           <span>{p.members.length}</span>
           {p.isHost && <span className="sbpt-crown" title="You're the host">👑</span>}
-          {p.ready && <span className="sbpt-ready-dot" title="Ready check" />}
+          {(p.ready || (p.poll && !p.poll.closed && p.poll.myVote == null)) && <span className="sbpt-ready-dot" title={p.ready ? "Ready check" : "Poll"} />}
           {p.status !== "connected" && <span className="sbpt-dot" />}
         </button>
       </>
@@ -384,6 +464,8 @@ export function PartyDock() {
             </div>
           )}
 
+          {p.poll ? <PollCard p={p} /> : pollForm && <PollForm p={p} onDone={() => setPollForm(false)} />}
+
           <div className="sbpt-tabs" role="tablist">
             <button role="tab" className={tab === "chat" ? "on" : ""} onClick={() => setTab("chat")}>Chat</button>
             <button role="tab" className={tab === "queue" ? "on" : ""} onClick={() => setTab("queue")}>
@@ -448,6 +530,11 @@ export function PartyDock() {
                 {EMOJI.map((e) => (
                   <button key={e} onClick={() => sendReaction(e)} aria-label={`React ${e}`}>{e}</button>
                 ))}
+                {!p.poll && !pollForm && (
+                  <button className="sbpt-poll-btn" onClick={() => setPollForm(true)} aria-label="Start a poll" title="Start a poll">
+                    📊
+                  </button>
+                )}
               </div>
               <form
                 className="sbpt-send"

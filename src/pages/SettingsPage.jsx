@@ -16,6 +16,8 @@ import {
 import { clearTmdbCache } from "../utils/api";
 import {
   ACCENT_PRESETS,
+  accentHexOf,
+  accentLabel,
   applyAccentColor,
   THEME_PRESETS,
   applyTheme,
@@ -1417,7 +1419,7 @@ function AppearanceSection() {
                       ? `linear-gradient(135deg, ${customVars["--bg"]} 50%, ${customVars["--surface2"]} 50%)`
                       : t.vars
                         ? `linear-gradient(135deg, ${t.vars["--bg"]} 50%, ${t.vars["--surface2"]} 50%)`
-                        : "var(--surface3)",
+                        : t.swatch || "var(--surface3)",
                   border: "1px solid rgba(255,255,255,0.08)",
                   flexShrink: 0,
                 }}
@@ -1569,9 +1571,39 @@ function AppearanceSection() {
               }}
             />
           ))}
+          {/* your own colour */}
+          <label
+            title="Your own colour"
+            style={{
+              position: "relative",
+              width: 32,
+              height: 32,
+              borderRadius: "50%",
+              background: String(accent).startsWith("#")
+                ? accent
+                : "conic-gradient(#e50914, #d97706, #eab308, #059669, #0891b2, #2563eb, #7c3aed, #db2777, #e50914)",
+              border: String(accent).startsWith("#") ? "3px solid var(--text)" : "3px solid transparent",
+              outline: String(accent).startsWith("#") ? `2px solid ${accent}` : "none",
+              outlineOffset: 2,
+              cursor: "pointer",
+              flexShrink: 0,
+              overflow: "hidden",
+            }}
+          >
+            <input
+              type="color"
+              aria-label="Your own colour"
+              value={accentHexOf(accent)}
+              onChange={(e) => {
+                setAccent(e.target.value);
+                applyAccentColor(e.target.value);
+              }}
+              style={{ position: "absolute", inset: 0, width: "100%", height: "100%", opacity: 0, cursor: "pointer" }}
+            />
+          </label>
         </div>
         <div style={{ fontSize: 12, color: "var(--text3)", marginTop: 8 }}>
-          {ACCENT_PRESETS.find((p) => p.id === accent)?.label}, applied to
+          {accentLabel(accent)}, applied to
           buttons, highlights, and indicators.
         </div>
         {/* Accent in streaming player */}

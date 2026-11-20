@@ -13,7 +13,7 @@ const _todayForEpisodes = (() => {
  * In a watch party only the host moves on: the next title from the party
  * queue comes first, otherwise the next episode (and everyone follows).
  */
-export function useAutoplay({ nextEp, playEpisode, restricted, partyItem }) {
+export function useAutoplay({ nextEp, playEpisode, restricted, partyItem, onAdvance }) {
   const [autoplayCountdown, setAutoplayCountdown] = useState(null);
   const [upNextQueue, setUpNextQueue] = useState(null); // party queue item shown instead of nextEp
   const countdownIntervalRef = useRef(null);
@@ -36,6 +36,8 @@ export function useAutoplay({ nextEp, playEpisode, restricted, partyItem }) {
     partyItemRef.current = partyItem;
   }, [partyItem]);
   const queueRef = useRef(null);
+  const onAdvanceRef = useRef(onAdvance);
+  onAdvanceRef.current = onAdvance;
 
   const cancelAutoplay = useCallback(() => {
     if (countdownIntervalRef.current) {
@@ -48,6 +50,10 @@ export function useAutoplay({ nextEp, playEpisode, restricted, partyItem }) {
   }, []);
 
   const goNext = useCallback(() => {
+    // moving on (button or countdown) means the current one is done
+    try {
+      onAdvanceRef.current?.();
+    } catch {}
     const q = queueRef.current;
     if (q) {
       playFromQueue(q.key);
