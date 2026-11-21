@@ -227,6 +227,7 @@ final class Downloads: NSObject, URLSessionDataDelegate, URLSessionDownloadDeleg
     private var pumping = false
     private var bgEventsHandler: (() -> Void)?
     private var bgEventsFinished = false
+    private var bgEventsToken = 0
     private var lastNotify: [String: TimeInterval] = [:]
     private var saveScheduled = false
     private let jobs: OperationQueue = {
@@ -501,8 +502,19 @@ final class Downloads: NSObject, URLSessionDataDelegate, URLSessionDownloadDeleg
     /** AppDelegate: iOS (re)launched the app to deliver background download events. */
     func handleBackgroundEvents(_ done: @escaping () -> Void) {
         q.async {
+            // this handler's events follow, then urlSessionDidFinishEvents
+            self.bgEventsFinished = false
             self.bgEventsHandler = done
-            self.flushBackgroundEventsLocked()
+            self.bgEventsToken += 1
+            let token = self.bgEventsToken
+            // safety net: never keep iOS waiting for the handler
+            self.q.asyncAfter(deadline: .now() + 25) {
+                guard self.bgEventsToken == token, let h = self.bgEventsHandler else { return }
+                self.bgEventsHandler = nil
+                self.pumpLocked()
+                self.saveNowLocked()
+                DispatchQueue.main.async { h() }
+            }
         }
     }
 
