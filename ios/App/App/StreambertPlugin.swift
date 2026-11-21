@@ -2,7 +2,8 @@
 // Android plugin (StreambertPlugin.java) so the shared JS works unchanged.
 // What's not possible / not built on iOS yet resolves with a harmless default
 // (Chromecast, widgets, background episode checks, voice search).
-// Downloads: Downloads.swift; playing them: LocalPlayer.swift.
+// Downloads: Downloads.swift (a background URLSession, so they continue while the
+// app is in the background); playing them: LocalPlayer.swift.
 import AVFoundation
 import Capacitor
 import Foundation
@@ -220,6 +221,8 @@ public class StreambertPlugin: CAPPlugin, CAPBridgedPlugin, UNUserNotificationCe
         let args = options(call)
         var headers: [String: String] = [:]
         for (k, v) in options(call, "headers") { headers[k] = "\(v)" }
+        // ask once for notifications: a download that finishes in the background shows one
+        withPermission { _ in }
         let begin = {
             let id = Downloads.shared.start(args, headers: headers)
             call.resolve(["ok": true, "id": id])

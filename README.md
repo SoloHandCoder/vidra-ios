@@ -93,7 +93,7 @@ On first start, paste your free **TMDB read access token** ([how to get one](htt
 
 ## 🧭 What's different on iPhone
 
-- **Downloads** work like on Android: pick a quality, download single episodes or whole seasons, pause and continue, Wi-Fi only if you like. Downloads continue while Vidra is open; when you leave the app they pause after a short while and continue when you come back. They're kept in Vidra's own storage (also visible in the Files app under On My iPhone → Vidra → Downloads) and play in iOS's own video player, with subtitles and where you left off.
+- **Downloads** work like on Android: pick a quality, download single episodes or whole seasons, pause and continue, Wi-Fi only if you like. Downloads keep going in the background: when you leave Vidra or lock the phone, iOS carries on with them, finishes them even if it suspends or closes Vidra in the meantime, and shows a notification when one is done. Limits: iOS decides how fast background transfers run (on low battery, in Low Power Mode or with lots of downloads it may slow them down), swiping Vidra away in the app switcher stops them until you open it again, and a stream link that expires while the phone is locked fails the download (continuing it fetches a fresh link). They're kept in Vidra's own storage (also visible in the Files app under On My iPhone → Vidra → Downloads) and play in iOS's own video player, with subtitles and where you left off.
 - **Not available yet:** Chromecast, home-screen widgets, background new-episode checks and voice search.
 - Fullscreen and picture-in-picture use iOS's own video player.
 
@@ -129,7 +129,7 @@ Settings → Profiles &amp; Privacy → Cloud sync. Your data goes into a privat
   - **Frame script**: `public/native/sb-inject.js` is injected into every frame (WKUserScript). It provides `executeJavaScript` for embedded players and stubs pop-ups.
   - **Ad blocking**: the shared block list (`public/native/sb-blocklist.txt`) is compiled into a WebKit content blocker.
   - **Navigation**: embedded players can't navigate the whole app away to ad pages.
-  - `Downloads.swift`: the native HLS / file downloader (best variant, AES-128 keys and init segments, 6 parallel requests, a local `index.m3u8`, pause / resume, a registry that survives restarts, `downloadProgress` events).
+  - `Downloads.swift`: the native HLS / file downloader (best variant, AES-128 keys and init segments, a local `index.m3u8`, pause / resume, a registry that survives restarts, `downloadProgress` events). Playlists are read with a normal `URLSession`; every segment / file is a download task of a background `URLSession`, so downloads continue while the app is in the background, suspended or relaunched by iOS (`AppDelegate` forwards `handleEventsForBackgroundURLSession`).
   - `LocalPlayer.swift`: plays downloads in `AVPlayerViewController`; downloaded HLS folders are served to it by a small HTTP server on `127.0.0.1`.
   - `MainViewController.swift` registers the plugin.
 </details>

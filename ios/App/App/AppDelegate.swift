@@ -10,7 +10,20 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
     func application(_ application: UIApplication, didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]?) -> Bool {
         // play video sound even with the silent switch on, and keep audio going in picture-in-picture
         try? AVAudioSession.sharedInstance().setCategory(.playback, mode: .moviePlayback)
+        // re-create the background download session right away: when iOS relaunched the app
+        // in the background for finished downloads, their events are delivered to it
+        _ = Downloads.shared
         return true
+    }
+
+    func application(_ application: UIApplication, handleEventsForBackgroundURLSession identifier: String,
+                     completionHandler: @escaping () -> Void) {
+        if identifier == Downloads.sessionId {
+            // called once all events are handled and the next batch is queued
+            Downloads.shared.handleBackgroundEvents(completionHandler)
+        } else {
+            completionHandler()
+        }
     }
 
     func applicationWillResignActive(_ application: UIApplication) {

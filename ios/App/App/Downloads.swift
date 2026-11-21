@@ -1,13 +1,29 @@
 // Native downloader for the iOS app (a port of the Android app's Downloads.java).
-// HLS: picks the best variant (and its audio rendition), downloads every segment,
-// key and init map with 6 parallel requests and writes a local playlist
-// (index.m3u8 with relative paths) next to them. Direct files (mp4) are streamed
-// to disk and can be continued with a Range request.
-// Downloads run while the app is open; when it goes to the background they get the
-// extra time iOS allows, then pause and continue automatically when it's back.
+// HLS: picks the best variant (and its audio rendition), plans every segment, key
+// and init map and writes a local playlist (index.m3u8 with relative paths) next
+// to them. Direct files (mp4) are downloaded as one file.
+//
+// Two phases:
+//  1. Planning (app running): playlists and subtitles are fetched with a normal
+//     URLSession; the result (segment URLs → local file names, the final playlist)
+//     is saved as a plan file in the download's folder.
+//  2. Transfer: every segment / the file is a download task of one background
+//     URLSession. iOS runs those in its own process, so they keep going while
+//     Vidra is in the background, the phone is locked or the app was suspended or
+//     closed by the system. Each task carries "<id>|<index>|<relative path>" in its
+//     taskDescription, so a finished file can be put in place even right after a
+//     relaunch. A segment counts as done when its file exists, so nothing is
+//     downloaded twice. When the last one lands (also when iOS relaunched the app in
+//     the background just to deliver it) the playlist is written, the entry is marked
+//     completed and a notification is shown if Vidra isn't on screen.
+// iOS slows down background sessions with thousands of tiny tasks, so while the app
+// is open only a small window of segments is queued; when the app is about to leave
+// the screen the queue is topped up to a large batch (tasks created while the app is
+// in the background are treated as discretionary by iOS, so this happens before).
 import Foundation
 import Network
 import UIKit
+import UserNotifications
 
 struct DownloadError: LocalizedError {
     let message: String
@@ -15,13 +31,12 @@ struct DownloadError: LocalizedError {
     var errorDescription: String? { message }
 }
 
-/** One running download: cancelling it stops all of its requests. */
+/** The planning step of a download: cancelling it stops its requests. */
 final class DownloadJob {
     private let lock = NSLock()
     private var _cancelled = false
     private var _pausing = false
     private var tasks: [Int: URLSessionTask] = [:]
-    var pool: OperationQueue?
 
     var cancelled: Bool { lock.lock(); defer { lock.unlock() }; return _cancelled }
     var pausing: Bool { lock.lock(); defer { lock.unlock() }; return _pausing }
@@ -44,102 +59,55 @@ final class DownloadJob {
         if pausing { _pausing = true }
         let ts = Array(tasks.values)
         tasks.removeAll()
-        let p = pool
         lock.unlock()
         ts.forEach { $0.cancel() }
-        p?.cancelAllOperations()
     }
 }
 
-/** Receives one response: into memory (playlists, errors) or into a file. */
+/** Receives one small response (playlists, subtitles) into memory. A probe stops as soon as it's clear the body isn't a playlist. */
 private final class Sink {
     var response: HTTPURLResponse?
-    let file: URL?
-    let append: Bool
-    let sniff: Bool
+    let probe: Bool
     let cap: Int
-    let onBytes: ((Sink, Int) -> Void)?
-    var mode = 0 // 0 undecided, 1 memory, 2 file
+    var mode = 0 // 0 undecided, 1 memory, 2 not a playlist (probe only, the request is stopped)
     var memory = Data()
-    var handle: FileHandle?
     var error: Error?
-    var appended = false
     let done = DispatchSemaphore(value: 0)
 
-    init(file: URL?, append: Bool, sniff: Bool, cap: Int, onBytes: ((Sink, Int) -> Void)?) {
-        self.file = file
-        self.append = append
-        self.sniff = sniff
+    init(probe: Bool, cap: Int) {
+        self.probe = probe
         self.cap = cap
-        self.onBytes = onBytes
     }
 
     var status: Int { response?.statusCode ?? 0 }
     var isMemory: Bool { mode == 1 }
+    var rejected: Bool { mode == 2 }
     var text: String {
         String(data: memory, encoding: .utf8) ?? String(decoding: memory, as: UTF8.self)
     }
 
     func receive(_ d: Data) {
-        if error != nil { return }
-        if mode == 0 {
-            memory.append(d)
-            if memory.count >= 64 { decide() }
-            return
-        }
-        write(d)
+        if error != nil || mode == 2 { return }
+        memory.append(d)
+        if mode == 0 && (!probe || memory.count >= 64) { decide() }
+        if mode == 1 && memory.count > cap { error = DownloadError("Response too large") }
     }
 
     private func decide() {
-        guard mode == 0 else { return }
-        let pending = memory
-        memory = Data()
-        if file == nil || status >= 400 {
-            mode = 1
-        } else if sniff, Sink.looksLikePlaylist(pending, contentType: response?.value(forHTTPHeaderField: "Content-Type")) {
+        if !probe || status >= 400 || Sink.looksLikePlaylist(memory, contentType: response?.value(forHTTPHeaderField: "Content-Type")) {
             mode = 1
         } else {
             mode = 2
-            do {
-                let f = file!
-                let fm = FileManager.default
-                if append && status == 206 && fm.fileExists(atPath: f.path) {
-                    let h = try FileHandle(forWritingTo: f)
-                    try h.seekToEnd()
-                    handle = h
-                    appended = true
-                } else {
-                    try? fm.removeItem(at: f)
-                    fm.createFile(atPath: f.path, contents: nil)
-                    handle = try FileHandle(forWritingTo: f)
-                }
-            } catch {
-                self.error = error
-                return
-            }
-        }
-        if !pending.isEmpty { write(pending) }
-    }
-
-    private func write(_ d: Data) {
-        if mode == 1 {
-            memory.append(d)
-            if memory.count > cap { error = DownloadError("Response too large") }
-            return
-        }
-        do {
-            try handle?.write(contentsOf: d)
-            onBytes?(self, d.count)
-        } catch {
-            self.error = error
+            memory = Data()
         }
     }
 
     func finish(_ err: Error?) {
-        if mode == 0 { decide() }
-        if error == nil { error = err }
-        try? handle?.close()
-        handle = nil
+        if mode == 0 {
+            if let e = err, error == nil { error = e; done.signal(); return }
+            decide()
+        }
+        if mode != 2 && error == nil { error = err }
         done.signal()
     }
 
@@ -151,18 +119,114 @@ private final class Sink {
     }
 }
 
-final class Downloads: NSObject, URLSessionDataDelegate {
+/** The transfer phase of one download (all state is only touched on Downloads.q). */
+private final class Run {
+    let id: String
+    let dir: URL
+    let kind: String // "hls" or "file"
+    let name: String
+    let headers: [String: String]
+    var segs: [(url: String, rel: String)] = []
+    var finalRel = "index.m3u8"
+    var finalText = ""
+    var fileUrl = ""
+    var fileRel = ""
+    var subs: [[String: Any]] = []
+    var done: [Bool] = []
+    var doneCount = 0
+    var bytes: Int64 = 0
+    /** segments before this index are done, queued or waiting for a retry */
+    var scan = 0
+    var inflight: [Int: URLSessionTask] = [:]
+    var attempts: [Int: Int] = [:]
+    var retryAt: [Int: TimeInterval] = [:]
+    var fileTask: URLSessionTask?
+    var fileWaitingResume = false
+    var fileGot: Int64 = 0
+    var fileTotal: Int64 = 0
+    var winBytes: Int64 = 0
+    var winStart = Date().timeIntervalSince1970
+    var lastEmit: TimeInterval = 0
+    var speed = ""
+
+    init(id: String, dir: URL, kind: String, name: String, headers: [String: String]) {
+        self.id = id
+        self.dir = dir
+        self.kind = kind
+        self.name = name
+        self.headers = headers
+    }
+
+    var taskCount: Int { inflight.count + (fileTask == nil ? 0 : 1) }
+
+    func tickSpeed(_ now: TimeInterval) {
+        if now - winStart > 1.5 {
+            speed = String(format: "%.2f MB/s", Double(winBytes) / (now - winStart) / 1e6)
+            winBytes = 0
+            winStart = now
+        }
+    }
+}
+
+/** What a finished background task left behind (set in didFinishDownloadingTo, used in didComplete). */
+private enum Outcome {
+    case ok(Int64)
+    case http(Int)
+    case failed(String)
+}
+
+/** Keeps the app running a little longer in the background (planning, topping up the queue). */
+private final class BgHold {
+    private let lock = NSLock()
+    private var id: UIBackgroundTaskIdentifier = .invalid
+
+    init(_ name: String) {
+        let t = UIApplication.shared.beginBackgroundTask(withName: name) { [weak self] in self?.end() }
+        lock.lock(); id = t; lock.unlock()
+    }
+
+    func end() {
+        lock.lock()
+        let t = id
+        id = .invalid
+        lock.unlock()
+        if t != .invalid { UIApplication.shared.endBackgroundTask(t) }
+    }
+}
+
+final class Downloads: NSObject, URLSessionDataDelegate, URLSessionDownloadDelegate {
     static let shared = Downloads()
+    static let sessionId = (Bundle.main.bundleIdentifier ?? "app.vidra") + ".downloads"
+
+    /** Segment tasks queued at once while the app is open. */
+    private static let liveWindow = 24
+    /** Segment tasks queued at once when the app leaves the screen / runs in the background. */
+    private static let bulkWindow = 2000
 
     /** Called with the full entry whenever a download changes (→ "downloadProgress"). */
     var onProgress: (([String: Any]) -> Void)?
-    /** The web view's user agent (stream hosts sometimes tie tokens to it). */
-    var userAgent: String?
+    /** The web view's user agent (stream hosts sometimes tie tokens to it). Kept for background relaunches. */
+    var userAgent: String? {
+        didSet { if let ua = userAgent { UserDefaults.standard.set(ua, forKey: "sb_dl_ua") } }
+    }
+    private var effectiveUserAgent: String? { userAgent ?? UserDefaults.standard.string(forKey: "sb_dl_ua") }
 
     private let q = DispatchQueue(label: "app.vidra.downloads")
     private let notifyQ = DispatchQueue(label: "app.vidra.downloads.notify")
     private var list: [[String: Any]] = []
+    /** downloads being planned */
     private var active: [String: DownloadJob] = [:]
+    /** downloads transferring in the background session */
+    private var runs: [String: Run] = [:]
+    /** downloads to start once the background session's tasks are known (id → re-plan) */
+    private var pendingSubmit: [String: Bool] = [:]
+    private var outcomes: [Int: Outcome] = [:]
+    private var attached = false
+    private var bulk = false
+    private var pumpScheduled = false
+    private var pumping = false
+    private var bgEventsHandler: (() -> Void)?
+    private var bgEventsFinished = false
     private var lastNotify: [String: TimeInterval] = [:]
     private var saveScheduled = false
     private let jobs: OperationQueue = {
@@ -172,12 +236,13 @@ final class Downloads: NSObject, URLSessionDataDelegate {
         return o
     }()
     private var session: URLSession!
+    private var bg: URLSession!
     private let sinkLock = NSLock()
     private var sinks: [Int: Sink] = [:]
     private let monitor = NWPathMonitor()
     private var path: NWPath?
     private var netCheckPending = false
-    private var bgTask: UIBackgroundTaskIdentifier = .invalid
+    private var hold: BgHold?
 
     let baseDir: URL = {
         let d = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
@@ -189,6 +254,10 @@ final class Downloads: NSObject, URLSessionDataDelegate {
 
     private override init() {
         super.init()
+        if Thread.isMainThread { bulk = UIApplication.shared.applicationState == .background }
+        load()
+
+        // playlists / subtitles / probes while planning
         let cfg = URLSessionConfiguration.default
         cfg.httpMaximumConnectionsPerHost = 8
         cfg.timeoutIntervalForRequest = 20
@@ -197,7 +266,25 @@ final class Downloads: NSObject, URLSessionDataDelegate {
         let dq = OperationQueue()
         dq.maxConcurrentOperationCount = 1
         session = URLSession(configuration: cfg, delegate: self, delegateQueue: dq)
-        load()
+
+        // segments and files: run by iOS, also while Vidra is suspended or closed
+        let bcfg = URLSessionConfiguration.background(withIdentifier: Downloads.sessionId)
+        bcfg.isDiscretionary = false
+        bcfg.sessionSendsLaunchEvents = true
+        bcfg.httpMaximumConnectionsPerHost = 6
+        bcfg.timeoutIntervalForRequest = 60
+        bcfg.requestCachePolicy = .reloadIgnoringLocalCacheData
+        bcfg.urlCache = nil
+        bcfg.httpShouldSetCookies = false // cookies are set on each request (see bgRequest)
+        let bq = OperationQueue()
+        bq.maxConcurrentOperationCount = 1
+        bq.underlyingQueue = q // delegate callbacks run on q, like every other state change
+        bg = URLSession(configuration: bcfg, delegate: self, delegateQueue: bq)
+        // re-attach to the tasks that kept running while the app was suspended / closed
+        bg.getAllTasks { [weak self] tasks in
+            self?.q.async { self?.attachLocked(tasks) }
+        }
+
         monitor.pathUpdateHandler = { [weak self] p in
             guard let self = self else { return }
             self.q.async {
@@ -212,11 +299,17 @@ final class Downloads: NSObject, URLSessionDataDelegate {
         }
         monitor.start(queue: DispatchQueue(label: "app.vidra.downloads.net"))
         let nc = NotificationCenter.default
+        nc.addObserver(forName: UIApplication.willResignActiveNotification, object: nil, queue: .main) { [weak self] _ in
+            self?.leavingScreen()
+        }
         nc.addObserver(forName: UIApplication.didEnterBackgroundNotification, object: nil, queue: .main) { [weak self] _ in
             self?.enteredBackground()
         }
         nc.addObserver(forName: UIApplication.willEnterForegroundNotification, object: nil, queue: .main) { [weak self] _ in
             self?.enteredForeground()
+        }
+        nc.addObserver(forName: UIApplication.didBecomeActiveNotification, object: nil, queue: .main) { [weak self] _ in
+            self?.becameActive()
         }
     }
 
@@ -225,17 +318,9 @@ final class Downloads: NSObject, URLSessionDataDelegate {
     private func load() {
         guard let d = try? Data(contentsOf: store),
               let arr = (try? JSONSerialization.jsonObject(with: d)) as? [[String: Any]] else { return }
-        list = arr.map { raw in
-            var o = rebased(raw)
-            // downloads interrupted by the app being closed → continue automatically
-            if (o["status"] as? String) == "downloading" {
-                o["status"] = "paused"
-                o["_autoResume"] = true
-                o["speed"] = ""
-                o["lastMessage"] = "Interrupted, resuming…"
-            }
-            return o
-        }
+        // "downloading" entries stay as they are: their background tasks are picked up
+        // again (or they're continued from their plan) once the session reports its tasks
+        list = arr.map { rebased($0) }
     }
 
     /** The app's folder path changes with updates / reinstalls: point stored paths at the current one. */
@@ -251,13 +336,17 @@ final class Downloads: NSObject, URLSessionDataDelegate {
         }
         o["downloadPath"] = baseDir.path
         if let subs = o["subtitlePaths"] as? [[String: Any]] {
-            o["subtitlePaths"] = subs.map { s -> [String: Any] in
-                var c = s
-                if let p = c["path"] as? String { c["path"] = rebase(p) }
-                return c
-            }
+            o["subtitlePaths"] = rebasedSubs(subs)
         }
         return o
+    }
+
+    private func rebasedSubs(_ subs: [[String: Any]]) -> [[String: Any]] {
+        subs.map { s -> [String: Any] in
+            var c = s
+            if let p = c["path"] as? String { c["path"] = rebase(p) }
+            return c
+        }
     }
 
     private func saveNowLocked() {
@@ -311,14 +400,24 @@ final class Downloads: NSObject, URLSessionDataDelegate {
         q.sync { emitLocked(id, patch, progressOnly: progressOnly) }
     }
 
+    private func isRunningLocked(_ id: String) -> Bool {
+        active[id] != nil || runs[id] != nil || pendingSubmit[id] != nil
+    }
+
     // ───────────────────────── settings / network ─────────────────────────
 
     private let wifiKey = "sb_dl_wifiOnly"
     var wifiOnly: Bool {
         get { UserDefaults.standard.bool(forKey: wifiKey) }
         set {
+            let changed = newValue != wifiOnly
             UserDefaults.standard.set(newValue, forKey: wifiKey)
-            q.async { self.onNetworkChangedLocked() }
+            guard changed else { return }
+            q.async {
+                // queued requests carry the old cellular setting → queue them again
+                self.requeueAllLocked()
+                self.onNetworkChangedLocked()
+            }
         }
     }
 
@@ -334,48 +433,92 @@ final class Downloads: NSObject, URLSessionDataDelegate {
 
     private func onNetworkChangedLocked() {
         if !networkAllowedLocked() {
-            for id in Array(active.keys) { pauseLocked(id, reason: waitReason, autoResume: true) }
+            // in the background iOS waits for the (Wi-Fi) network by itself; keep the tasks
+            if bulk { return }
+            for id in Array(active.keys) + Array(runs.keys) { pauseLocked(id, reason: waitReason, autoResume: true) }
         } else {
             resumeAutoLocked()
         }
     }
 
-    /** Continues downloads that were paused automatically (app closed / no network / background). */
+    /** Continues downloads that were paused automatically (app closed / no network). */
     func resumeAuto() { q.async { self.resumeAutoLocked() } }
 
     private func resumeAutoLocked() {
         guard networkAllowedLocked() else { return }
         for o in list where (o["status"] as? String) == "paused" && (o["_autoResume"] as? Bool) == true {
-            if let id = o["id"] as? String { resumeLocked(id) }
+            if let id = o["id"] as? String { resumeLocked(id, replan: false) }
         }
     }
 
-    // ───────────────────────── background ─────────────────────────
+    // ───────────────────────── app state ─────────────────────────
+
+    /** About to leave the screen: queue a big batch now, while iOS still treats new tasks as non-discretionary. */
+    private func leavingScreen() {
+        q.async {
+            self.bulk = true
+            self.pumpLocked()
+        }
+    }
 
     private func enteredBackground() {
-        let running = q.sync { !active.isEmpty }
-        guard running, bgTask == .invalid else { return }
-        bgTask = UIApplication.shared.beginBackgroundTask(withName: "Downloads") { [weak self] in
-            guard let self = self else { return }
-            self.q.sync {
-                for id in Array(self.active.keys) {
-                    self.pauseLocked(id, reason: "Paused while Vidra was in the background", autoResume: true)
-                }
+        if hold == nil { hold = BgHold("Vidra downloads") }
+        q.async {
+            self.bulk = true
+            self.pumpLocked()
+            self.saveNowLocked()
+            if self.active.isEmpty {
+                // nothing is being planned: the background session carries on alone
+                DispatchQueue.main.async { self.endHold() }
             }
-            self.endBackgroundTask()
         }
     }
 
     private func enteredForeground() {
-        endBackgroundTask()
+        endHold()
         resumeAuto()
     }
 
-    private func endBackgroundTask() {
-        if bgTask != .invalid {
-            UIApplication.shared.endBackgroundTask(bgTask)
-            bgTask = .invalid
+    private func becameActive() {
+        endHold()
+        q.async { self.bulk = false }
+        bg.getAllTasks { [weak self] tasks in
+            guard let self = self else { return }
+            self.q.async {
+                guard self.attached else { return }
+                self.reconcileLocked(tasks)
+                self.onNetworkChangedLocked()
+                self.pumpLocked()
+            }
         }
+    }
+
+    private func endHold() {
+        hold?.end()
+        hold = nil
+    }
+
+    /** AppDelegate: iOS (re)launched the app to deliver background download events. */
+    func handleBackgroundEvents(_ done: @escaping () -> Void) {
+        q.async {
+            self.bgEventsHandler = done
+            self.flushBackgroundEventsLocked()
+        }
+    }
+
+    private func flushBackgroundEventsLocked() {
+        guard attached, bgEventsFinished, let h = bgEventsHandler else { return }
+        bgEventsFinished = false
+        bgEventsHandler = nil
+        pumpLocked()
+        saveNowLocked()
+        DispatchQueue.main.async { h() }
+    }
+
+    func urlSessionDidFinishEvents(forBackgroundURLSession session: URLSession) {
+        // runs on q (the background session's delegate queue)
+        bgEventsFinished = true
+        flushBackgroundEventsLocked()
     }
 
     // ───────────────────────── control ─────────────────────────
@@ -416,7 +559,7 @@ final class Downloads: NSObject, URLSessionDataDelegate {
             if !tmdb.isEmpty {
                 let stale = list.filter { d in
                     let did = (d["id"] as? String) ?? ""
-                    return active[did] == nil && Downloads.str(d["tmdbId"]) == tmdb && Downloads.str(d["mediaType"]) == type
+                    return !isRunningLocked(did) && Downloads.str(d["tmdbId"]) == tmdb && Downloads.str(d["mediaType"]) == type
                         && Downloads.str(d["season"]) == s && Downloads.str(d["episode"]) == ep
                 }
                 for d in stale { deleteMedia(d) }
@@ -428,19 +571,29 @@ final class Downloads: NSObject, URLSessionDataDelegate {
             if !networkAllowedLocked() {
                 emitLocked(id, ["status": "paused", "_autoResume": true, "lastMessage": waitReason])
             } else {
-                submitLocked(id)
+                submitLocked(id, replan: true)
             }
         }
         return id
     }
 
-    private func submitLocked(_ id: String) {
-        guard active[id] == nil else { return }
+    /** replan: fetch the playlists again (fresh links); otherwise continue from the saved plan if there is one. */
+    private func submitLocked(_ id: String, replan: Bool) {
+        guard active[id] == nil, runs[id] == nil else { return }
+        if !attached {
+            pendingSubmit[id] = replan || (pendingSubmit[id] ?? false)
+            return
+        }
+        pendingSubmit[id] = nil
+        if !replan, let r = runFromPlanLocked(id) {
+            startTransferLocked(r)
+            return
+        }
         let job = DownloadJob()
         active[id] = job
         jobs.addOperation { [weak self] in
             guard let self = self, !job.cancelled else { return }
-            self.run(id, job)
+            self.plan(id, job)
         }
     }
 
@@ -450,17 +603,19 @@ final class Downloads: NSObject, URLSessionDataDelegate {
     }
 
     private func pauseLocked(_ id: String, reason: String, autoResume: Bool) {
+        pendingSubmit[id] = nil
         if let j = active.removeValue(forKey: id) { j.cancel(pausing: true) }
+        if let r = runs.removeValue(forKey: id) { cancelTasksLocked(r, keepResumeData: true) }
         if let o = findLocked(id), (o["status"] as? String) != "completed" {
             emitLocked(id, ["status": "paused", "speed": "", "_autoResume": autoResume, "lastMessage": reason])
         }
     }
 
     /** Continues a paused (or failed) download from where it stopped. */
-    func resume(_ id: String) { q.sync { resumeLocked(id) } }
+    func resume(_ id: String) { q.sync { resumeLocked(id, replan: true) } }
 
-    private func resumeLocked(_ id: String) {
-        guard let o = findLocked(id), active[id] == nil else { return }
+    private func resumeLocked(_ id: String, replan: Bool) {
+        guard let o = findLocked(id), !isRunningLocked(id) else { return }
         let st = (o["status"] as? String) ?? ""
         guard st == "paused" || st == "error" else { return }
         if !networkAllowedLocked() {
@@ -468,11 +623,13 @@ final class Downloads: NSObject, URLSessionDataDelegate {
             return
         }
         emitLocked(id, ["status": "downloading", "_autoResume": false, "lastMessage": "Resuming…", "speed": ""])
-        submitLocked(id)
+        submitLocked(id, replan: replan || st == "error")
     }
 
     private func cancelLocked(_ id: String) {
+        pendingSubmit[id] = nil
         if let j = active.removeValue(forKey: id) { j.cancel(pausing: false) }
+        if let r = runs.removeValue(forKey: id) { cancelTasksLocked(r, keepResumeData: false) }
     }
 
     func delete(_ id: String, deleteFiles: Bool) {
@@ -482,6 +639,7 @@ final class Downloads: NSObject, URLSessionDataDelegate {
             if deleteFiles { deleteMedia(list[i]) }
             list.remove(at: i)
             saveNowLocked()
+            pumpLocked()
         }
     }
 
@@ -584,7 +742,54 @@ final class Downloads: NSObject, URLSessionDataDelegate {
         return n
     }
 
-    // ───────────────────────── networking ─────────────────────────
+    private static func makeURL(_ s: String) -> URL? {
+        URL(string: s) ?? URL(string: s.addingPercentEncoding(withAllowedCharacters: .urlFragmentAllowed) ?? "")
+    }
+
+    /** A GET with the download's headers, the web view's user agent, cookies and the Wi-Fi-only setting. */
+    private func request(_ url: String, headers: [String: String], timeout: TimeInterval, cookies: Bool) -> URLRequest? {
+        guard let u = Downloads.makeURL(url) else { return nil }
+        var req = URLRequest(url: u, cachePolicy: .reloadIgnoringLocalCacheData, timeoutInterval: timeout)
+        for (k, v) in headers { req.setValue(v, forHTTPHeaderField: k) }
+        if req.value(forHTTPHeaderField: "User-Agent") == nil, let ua = effectiveUserAgent { req.setValue(ua, forHTTPHeaderField: "User-Agent") }
+        if cookies, req.value(forHTTPHeaderField: "Cookie") == nil,
+           let cs = HTTPCookieStorage.shared.cookies(for: u), !cs.isEmpty,
+           let c = HTTPCookie.requestHeaderFields(with: cs)["Cookie"] {
+            req.setValue(c, forHTTPHeaderField: "Cookie")
+        }
+        let wifi = wifiOnly
+        req.allowsCellularAccess = !wifi
+        req.allowsExpensiveNetworkAccess = !wifi
+        return req
+    }
+
+    private static func planURL(_ dir: URL) -> URL { dir.appendingPathComponent(".vidra-plan.json") }
+    private static func resumeURL(_ dir: URL) -> URL { dir.appendingPathComponent(".vidra-resume.dat") }
+
+    private static func readPlan(_ dir: URL) -> [String: Any]? {
+        guard let d = try? Data(contentsOf: planURL(dir)) else { return nil }
+        return (try? JSONSerialization.jsonObject(with: d)) as? [String: Any]
+    }
+
+    /** "<id>|<segment index or -1 for a file>|<path relative to the download folder>" */
+    private struct Tag {
+        let id: String
+        let index: Int
+        let rel: String
+
+        init?(_ s: String?) {
+            guard let s = s else { return nil }
+            let p = s.split(separator: "|", maxSplits: 2, omittingEmptySubsequences: false)
+            guard p.count == 3, let i = Int(p[1]), !p[0].isEmpty, !p[2].isEmpty else { return nil }
+            id = String(p[0])
+            index = i
+            rel = String(p[2])
+        }
+
+        static func make(_ id: String, _ i: Int, _ rel: String) -> String { "\(id)|\(i)|\(rel)" }
+    }
+
+    // ───────────────────────── planning requests (foreground session) ─────────────────────────
 
     func urlSession(_ session: URLSession, dataTask: URLSessionDataTask, didReceive response: URLResponse,
                     completionHandler: @escaping (URLSession.ResponseDisposition) -> Void) {
@@ -596,27 +801,24 @@ final class Downloads: NSObject, URLSessionDataDelegate {
     func urlSession(_ session: URLSession, dataTask: URLSessionDataTask, didReceive data: Data) {
         sinkLock.lock(); let s = sinks[dataTask.taskIdentifier]; sinkLock.unlock()
         s?.receive(data)
-        if s?.error != nil { dataTask.cancel() }
+        if s?.error != nil || s?.rejected == true { dataTask.cancel() }
     }
 
     func urlSession(_ session: URLSession, task: URLSessionTask, didCompleteWithError error: Error?) {
+        if session === bg {
+            bgCompletedLocked(task, error) // on q
+            return
+        }
         sinkLock.lock(); let s = sinks.removeValue(forKey: task.taskIdentifier); sinkLock.unlock()
         if s?.response == nil { s?.response = task.response as? HTTPURLResponse }
         s?.finish(error)
     }
 
-    /** Blocking GET. With `file` the body is written there (unless it's an error / a sniffed playlist). */
-    private func fetch(_ url: String, headers: [String: String], extra: [String: String] = [:], job: DownloadJob,
-                       file: URL? = nil, append: Bool = false, sniff: Bool = false, timeout: TimeInterval = 20,
-                       onBytes: ((Sink, Int) -> Void)? = nil) throws -> Sink {
-        guard let u = URL(string: url) ?? URL(string: url.addingPercentEncoding(withAllowedCharacters: .urlFragmentAllowed) ?? "") else {
-            throw DownloadError("Bad URL")
-        }
-        var req = URLRequest(url: u, cachePolicy: .reloadIgnoringLocalCacheData, timeoutInterval: timeout)
-        for (k, v) in headers { req.setValue(v, forHTTPHeaderField: k) }
-        if req.value(forHTTPHeaderField: "User-Agent") == nil, let ua = userAgent { req.setValue(ua, forHTTPHeaderField: "User-Agent") }
-        for (k, v) in extra { req.setValue(v, forHTTPHeaderField: k) }
-        let sink = Sink(file: file, append: append, sniff: sniff, cap: 40 * 1024 * 1024, onBytes: onBytes)
+    /** Blocking GET into memory. A probe stops early when the body isn't a playlist (→ `rejected`). */
+    private func fetch(_ url: String, headers: [String: String], job: DownloadJob, probe: Bool = false,
+                       timeout: TimeInterval = 20) throws -> Sink {
+        guard let req = request(url, headers: headers, timeout: timeout, cookies: false) else { throw DownloadError("Bad URL") }
+        let sink = Sink(probe: probe, cap: 40 * 1024 * 1024)
         let task = session.dataTask(with: req)
         sinkLock.lock(); sinks[task.taskIdentifier] = sink; sinkLock.unlock()
         guard job.add(task) else {
@@ -644,18 +846,21 @@ final class Downloads: NSObject, URLSessionDataDelegate {
         throw last
     }
 
-    // ───────────────────────── worker ─────────────────────────
+    // ───────────────────────── planning ─────────────────────────
 
-    private func run(_ id: String, _ job: DownloadJob) {
-        guard let e = q.sync(execute: { findLocked(id) }) else { return }
+    private func plan(_ id: String, _ job: DownloadJob) {
+        let h = BgHold("Vidra download")
+        defer { h.end() }
+        guard let e = q.sync(execute: { findLocked(id) }) else {
+            q.sync { if active[id] === job { active[id] = nil } }
+            return
+        }
         let url = (e["m3u8Url"] as? String) ?? ""
         let name = Downloads.safeName((e["name"] as? String) ?? "Video")
         let headers = (e["_headers"] as? [String: String]) ?? [:]
         let prevDir = (e["_dir"] as? String) ?? ""
         let dir = !prevDir.isEmpty ? URL(fileURLWithPath: prevDir, isDirectory: true)
             : baseDir.appendingPathComponent("\(name)_\(id.prefix(6))", isDirectory: true)
-        let partial = dir.appendingPathComponent(name + ".mp4.part")
-        let mp4 = dir.appendingPathComponent(name + ".mp4")
         let fm = FileManager.default
         do {
             try fm.createDirectory(at: dir, withIntermediateDirectories: true)
@@ -666,42 +871,52 @@ final class Downloads: NSObject, URLSessionDataDelegate {
             update(id, ["_dir": dir.path])
             emit(id, ["lastMessage": "Starting…"])
 
-            if (e["_kind"] as? String) == "file", fm.fileExists(atPath: partial.path), Downloads.sizeOf(partial) > 0 {
-                // continue a partly downloaded file with a Range request
-                try downloadFile(id, url: url, headers: headers, part: partial, resume: true, job: job)
-                if job.cancelled { return }
-                try finishFile(partial: partial, mp4: mp4)
-                try finish(id, e, dir: dir, name: name, headers: headers, finalPath: mp4.path, job: job)
-                return
-            }
-
-            let looksHls = url.lowercased().contains(".m3u8")
-            var probe: Sink?
-            if !looksHls {
-                // sniff the body: many hosts serve playlists from extension-less URLs
-                probe = try fileProbe(id, url: url, headers: headers, part: partial, job: job)
-            }
-            if looksHls || probe?.isMemory == true {
-                var text: String, base: String
-                if let p = probe {
-                    if p.status >= 400 { throw DownloadError("HTTP \(p.status)") }
-                    text = p.text
-                    base = p.response?.url?.absoluteString ?? url
-                } else {
-                    (text, base) = try fetchText(url, headers: headers, job: job)
-                }
-                guard text.trimmingCharacters(in: .whitespacesAndNewlines).replacingOccurrences(of: "\u{FEFF}", with: "").hasPrefix("#EXTM3U") else {
-                    throw DownloadError("Not a valid HLS playlist")
-                }
-                update(id, ["_kind": "hls"])
-                let finalPath = try downloadHls(id, url: base, text: text, dir: dir, headers: headers, job: job,
-                                                maxHeight: Downloads.int(e["quality"]), fallback: e["_fallback"] as? String)
-                if job.cancelled { return }
-                try finish(id, e, dir: dir, name: name, headers: headers, finalPath: finalPath, job: job)
+            var p: [String: Any]
+            let filePlan: [String: Any] = ["kind": "file", "url": url, "rel": name + ".mp4"]
+            if (e["_kind"] as? String) == "file", fm.fileExists(atPath: Downloads.resumeURL(dir).path) {
+                // continue a partly downloaded file
+                p = filePlan
             } else {
-                if job.cancelled { return }
-                try finishFile(partial: partial, mp4: mp4)
-                try finish(id, e, dir: dir, name: name, headers: headers, finalPath: mp4.path, job: job)
+                let looksHls = url.lowercased().contains(".m3u8")
+                var probe: Sink?
+                if !looksHls {
+                    // sniff the body: many hosts serve playlists from extension-less URLs
+                    probe = try fetch(url, headers: headers, job: job, probe: true, timeout: 20)
+                }
+                if looksHls || probe?.isMemory == true {
+                    var text: String, base: String
+                    if let pr = probe {
+                        if pr.status >= 400 { throw DownloadError("HTTP \(pr.status)") }
+                        text = pr.text
+                        base = pr.response?.url?.absoluteString ?? url
+                    } else {
+                        (text, base) = try fetchText(url, headers: headers, job: job)
+                    }
+                    guard text.trimmingCharacters(in: .whitespacesAndNewlines).replacingOccurrences(of: "\u{FEFF}", with: "").hasPrefix("#EXTM3U") else {
+                        throw DownloadError("Not a valid HLS playlist")
+                    }
+                    update(id, ["_kind": "hls"])
+                    let hp = try planHls(url: base, text: text, dir: dir, headers: headers, job: job,
+                                         maxHeight: Downloads.int(e["quality"]), fallback: e["_fallback"] as? String)
+                    p = ["kind": "hls", "segs": hp.segs.map { [$0.url, $0.rel] }, "final": hp.finalRel, "finalText": hp.finalText]
+                } else {
+                    update(id, ["_kind": "file"]) // a later resume continues this file
+                    p = filePlan
+                }
+            }
+            if job.cancelled { return }
+            p["subs"] = downloadSubtitles(e, dir: dir, name: name, headers: headers, job: job)
+            if job.cancelled { return }
+            guard JSONSerialization.isValidJSONObject(p) else { throw DownloadError("Couldn't save the download plan") }
+            try JSONSerialization.data(withJSONObject: p).write(to: Downloads.planURL(dir), options: .atomic)
+            q.sync {
+                guard active[id] === job else { return }
+                active[id] = nil
+                guard let e2 = findLocked(id), let r = makeRun(id, dir: dir, plan: p, entry: e2) else {
+                    emitLocked(id, ["status": "error", "lastMessage": "Error: nothing to download", "speed": ""])
+                    return
+                }
+                startTransferLocked(r)
             }
         } catch {
             let paused = job.pausing
@@ -715,91 +930,6 @@ final class Downloads: NSObject, URLSessionDataDelegate {
                 }
                 emitLocked(id, ["status": "error", "lastMessage": "Error: \(error.localizedDescription)", "speed": ""])
             }
-        }
-    }
-
-    private func finishFile(partial: URL, mp4: URL) throws {
-        let fm = FileManager.default
-        try? fm.removeItem(at: mp4)
-        try fm.moveItem(at: partial, to: mp4)
-        if Downloads.sizeOf(mp4) < 64 * 1024 { throw DownloadError("Server returned no video (file too small)") }
-    }
-
-    /** First request of a non-.m3u8 URL: a playlist ends up in memory, anything else is the file itself. */
-    private func fileProbe(_ id: String, url: String, headers: [String: String], part: URL, job: DownloadJob) throws -> Sink {
-        let progress = FileProgress(self, id, have: 0)
-        let s = try fetch(url, headers: headers, job: job, file: part, sniff: true, timeout: 20) { sink, n in progress.add(sink, n) }
-        if s.isMemory { return s }
-        if s.status >= 400 { throw DownloadError("HTTP \(s.status)") }
-        return s
-    }
-
-    private func downloadFile(_ id: String, url: String, headers: [String: String], part: URL, resume: Bool, job: DownloadJob) throws {
-        let have = Downloads.sizeOf(part)
-        let progress = FileProgress(self, id, have: have)
-        let s = try fetch(url, headers: headers, extra: resume ? ["Range": "bytes=\(have)-"] : [:], job: job,
-                          file: part, append: resume, timeout: 20) { sink, n in progress.add(sink, n) }
-        if s.status >= 400 { throw DownloadError("HTTP \(s.status)") }
-    }
-
-    /** Progress of a single-file download (size from Content-Length / Content-Range). */
-    private final class FileProgress {
-        weak var owner: Downloads?
-        let id: String
-        let have: Int64
-        var started = false
-        var got: Int64 = 0
-        var total: Int64 = 0
-        var lastT: TimeInterval = 0
-        var winB: Int64 = 0
-        var winT = Date().timeIntervalSince1970
-        var speed = ""
-        init(_ o: Downloads, _ id: String, have: Int64) { owner = o; self.id = id; self.have = have }
-
-        func add(_ sink: Sink, _ n: Int) {
-            guard let o = owner else { return }
-            if !started {
-                started = true
-                o.update(id, ["_kind": "file"]) // a later resume continues this file
-                got = sink.appended ? have : 0
-                if let r = sink.response {
-                    if let cr = r.value(forHTTPHeaderField: "Content-Range"), let slash = cr.lastIndex(of: "/"),
-                       let t = Int64(cr[cr.index(after: slash)...].trimmingCharacters(in: .whitespaces)) {
-                        total = t
-                    } else if r.expectedContentLength > 0 {
-                        total = r.expectedContentLength + (sink.appended ? have : 0)
-                    }
-                }
-            }
-            got += Int64(n)
-            winB += Int64(n)
-            let now = Date().timeIntervalSince1970
-            if now - winT > 1.5 {
-                speed = String(format: "%.2f MB/s", Double(winB) / (now - winT) / 1e6)
-                winB = 0
-                winT = now
-            }
-            if now - lastT > 0.5 {
-                lastT = now
-                let pct = total > 0 ? Int(min(99, got * 100 / total)) : 0
-                let size = total > 0 ? Downloads.human(Double(total)) : Downloads.human(Double(got))
-                o.emit(id, ["progress": pct, "speed": speed, "size": size,
-                            "lastMessage": "\(pct)% of \(total > 0 ? size : "?")"], progressOnly: true)
-            }
-        }
-    }
-
-    /** Saves the subtitles chosen/captured before the download next to the video, then marks it completed. */
-    private func finish(_ id: String, _ e: [String: Any], dir: URL, name: String, headers: [String: String],
-                        finalPath: String, job: DownloadJob) throws {
-        let subPaths = downloadSubtitles(e, dir: dir, name: name, headers: headers, job: job)
-        if job.cancelled { return }
-        q.sync {
-            guard active[id] === job else { return }
-            active[id] = nil
-            emitLocked(id, ["subtitlePaths": subPaths, "status": "completed", "progress": 100, "filePath": finalPath,
-                            "completedAt": Downloads.nowMs(), "lastMessage": "Completed", "speed": "",
-                            "size": Downloads.human(Double(Downloads.sizeOf(dir)))])
         }
     }
 
@@ -842,6 +972,426 @@ final class Downloads: NSObject, URLSessionDataDelegate {
         return out
     }
 
+    // ───────────────────────── transfer (background session, all on q) ─────────────────────────
+
+    private func runFromPlanLocked(_ id: String) -> Run? {
+        guard let e = findLocked(id), let ds = e["_dir"] as? String, !ds.isEmpty else { return nil }
+        let dir = URL(fileURLWithPath: ds, isDirectory: true)
+        guard let p = Downloads.readPlan(dir) else { return nil }
+        return makeRun(id, dir: dir, plan: p, entry: e)
+    }
+
+    private func makeRun(_ id: String, dir: URL, plan p: [String: Any], entry e: [String: Any]) -> Run? {
+        let kind = (p["kind"] as? String) ?? "hls"
+        let r = Run(id: id, dir: dir, kind: kind, name: (e["name"] as? String) ?? "Video",
+                    headers: (e["_headers"] as? [String: String]) ?? [:])
+        r.subs = rebasedSubs((p["subs"] as? [[String: Any]]) ?? [])
+        if kind == "file" {
+            r.fileUrl = (p["url"] as? String) ?? ""
+            r.fileRel = (p["rel"] as? String) ?? ""
+            if r.fileUrl.isEmpty || r.fileRel.isEmpty { return nil }
+            return r
+        }
+        guard let segs = p["segs"] as? [[String]] else { return nil }
+        r.segs = segs.compactMap { s -> (url: String, rel: String)? in s.count == 2 ? (url: s[0], rel: s[1]) : nil }
+        r.finalRel = (p["final"] as? String) ?? "index.m3u8"
+        r.finalText = (p["finalText"] as? String) ?? ""
+        if r.finalText.isEmpty { return nil }
+        r.done = Array(repeating: false, count: r.segs.count)
+        for (i, s) in r.segs.enumerated() {
+            let sz = Downloads.sizeOf(dir.appendingPathComponent(s.rel))
+            if sz > 0 {
+                r.done[i] = true
+                r.doneCount += 1
+                r.bytes += sz
+            }
+        }
+        return r
+    }
+
+    private func startTransferLocked(_ r: Run) {
+        runs[r.id] = r
+        if r.kind == "file" {
+            let dest = r.dir.appendingPathComponent(r.fileRel)
+            let hasResume = FileManager.default.fileExists(atPath: Downloads.resumeURL(r.dir).path)
+            if r.fileTask == nil, !hasResume, Downloads.sizeOf(dest) >= 64 * 1024 {
+                // finished while the app wasn't running and the completion got lost
+                finishLocked(r)
+                return
+            }
+            emitLocked(r.id, ["lastMessage": "Downloading…"])
+        } else {
+            let total = r.segs.count
+            emitLocked(r.id, ["totalFragments": total, "completedFragments": r.doneCount,
+                              "lastMessage": "Fragment \(r.doneCount) / \(total)"])
+            if r.doneCount == total {
+                finishLocked(r)
+                return
+            }
+        }
+        pumpLocked()
+    }
+
+    /** Queues more tasks: a small window while the app is open, a big batch otherwise. Oldest download first. */
+    private func pumpLocked() {
+        guard attached, !pumping, !runs.isEmpty else { return }
+        pumping = true
+        defer { pumping = false }
+        let cap = bulk ? Downloads.bulkWindow : Downloads.liveWindow
+        var used = runs.values.reduce(0) { $0 + $1.taskCount }
+        let now = Date().timeIntervalSince1970
+        var nextRetry: TimeInterval?
+        let order = list.reversed().compactMap { $0["id"] as? String }
+        outer: for id in order {
+            guard used < cap else { break }
+            guard let r = runs[id] else { continue }
+            if r.kind == "file" {
+                if r.fileTask != nil || r.fileWaitingResume { continue }
+                if let t = r.retryAt[-1], t > now { nextRetry = min(nextRetry ?? t, t); continue }
+                r.retryAt[-1] = nil
+                if startFileTaskLocked(r) { used += 1 }
+                continue
+            }
+            // retries that are due
+            for (i, t) in r.retryAt {
+                if used >= cap { break outer }
+                if t > now { nextRetry = min(nextRetry ?? t, t); continue }
+                r.retryAt[i] = nil
+                if r.done[i] || r.inflight[i] != nil { continue }
+                if !enqueueLocked(r, i) { continue outer }
+                used += 1
+            }
+            while used < cap && r.scan < r.segs.count {
+                let i = r.scan
+                r.scan += 1
+                if r.done[i] || r.inflight[i] != nil || r.retryAt[i] != nil { continue }
+                if !enqueueLocked(r, i) { continue outer }
+                used += 1
+            }
+        }
+        if let t = nextRetry, !pumpScheduled {
+            pumpScheduled = true
+            q.asyncAfter(deadline: .now() + max(0.05, t - now)) {
+                self.pumpScheduled = false
+                self.pumpLocked()
+            }
+        }
+    }
+
+    /** false when the run failed (bad URL). */
+    private func enqueueLocked(_ r: Run, _ i: Int) -> Bool {
+        let s = r.segs[i]
+        guard let req = request(s.url, headers: r.headers, timeout: 60, cookies: true) else {
+            failRunLocked(r, "Bad fragment URL")
+            return false
+        }
+        let t = bg.downloadTask(with: req)
+        t.taskDescription = Tag.make(r.id, i, s.rel)
+        r.inflight[i] = t
+        t.resume()
+        return true
+    }
+
+    private func startFileTaskLocked(_ r: Run) -> Bool {
+        let rd = Downloads.resumeURL(r.dir)
+        let t: URLSessionDownloadTask
+        if let data = try? Data(contentsOf: rd), !data.isEmpty {
+            try? FileManager.default.removeItem(at: rd) // used once; a failed resume starts over
+            t = bg.downloadTask(withResumeData: data)
+        } else {
+            guard let req = request(r.fileUrl, headers: r.headers, timeout: 60, cookies: true) else {
+                failRunLocked(r, "Bad URL")
+                return false
+            }
+            t = bg.downloadTask(with: req)
+        }
+        t.taskDescription = Tag.make(r.id, -1, r.fileRel)
+        r.fileTask = t
+        t.resume()
+        return true
+    }
+
+    private func cancelTasksLocked(_ r: Run, keepResumeData: Bool) {
+        r.inflight.values.forEach { $0.cancel() }
+        r.inflight.removeAll()
+        r.retryAt.removeAll()
+        guard let ft = r.fileTask else { return }
+        r.fileTask = nil
+        if keepResumeData, let dt = ft as? URLSessionDownloadTask {
+            let rd = Downloads.resumeURL(r.dir)
+            dt.cancel(byProducingResumeData: { d in if let d = d { try? d.write(to: rd, options: .atomic) } })
+        } else {
+            ft.cancel()
+        }
+    }
+
+    /** The Wi-Fi-only setting changed: queue everything again with the new setting. */
+    private func requeueAllLocked() {
+        for r in runs.values {
+            r.inflight.values.forEach { $0.cancel() }
+            r.inflight.removeAll()
+            r.scan = 0
+            if let dt = r.fileTask as? URLSessionDownloadTask {
+                r.fileTask = nil
+                r.fileWaitingResume = true
+                let rd = Downloads.resumeURL(r.dir)
+                dt.cancel(byProducingResumeData: { [weak self] d in
+                    if let d = d { try? d.write(to: rd, options: .atomic) }
+                    self?.q.async {
+                        r.fileWaitingResume = false
+                        self?.pumpLocked()
+                    }
+                })
+            }
+        }
+        pumpLocked()
+    }
+
+    /** The background session's current tasks: adopt the ones of running downloads, stop leftovers. */
+    private func reconcileLocked(_ tasks: [URLSessionTask]) {
+        for t in tasks where t.state == .running || t.state == .suspended {
+            guard let tag = Tag(t.taskDescription), let r = runs[tag.id] else {
+                t.cancel() // a download that isn't running any more (paused, deleted, finished)
+                continue
+            }
+            if tag.index < 0 {
+                if r.kind == "file" && r.fileTask == nil { r.fileTask = t }
+                else if r.fileTask?.taskIdentifier != t.taskIdentifier { t.cancel(); continue }
+            } else if tag.index < r.segs.count && !r.done[tag.index] {
+                if let have = r.inflight[tag.index] {
+                    if have.taskIdentifier != t.taskIdentifier { t.cancel(); continue }
+                } else {
+                    r.inflight[tag.index] = t
+                }
+            } else {
+                t.cancel()
+                continue
+            }
+            if t.state == .suspended { t.resume() }
+        }
+        // tasks that ended without their completion reaching us → queue them again
+        for r in runs.values {
+            for (i, t) in r.inflight where t.state == .completed {
+                r.inflight[i] = nil
+                r.scan = min(r.scan, i)
+            }
+            if let ft = r.fileTask, ft.state == .completed { r.fileTask = nil }
+        }
+    }
+
+    private func attachLocked(_ tasks: [URLSessionTask]) {
+        // downloads that were running when the app was suspended / closed
+        var built: [Run] = []
+        for o in list where (o["status"] as? String) == "downloading" {
+            guard let id = o["id"] as? String, active[id] == nil, runs[id] == nil, pendingSubmit[id] == nil else { continue }
+            if let r = runFromPlanLocked(id) {
+                runs[id] = r
+                built.append(r)
+            } else {
+                pendingSubmit[id] = true // was still being planned → plan again
+            }
+        }
+        reconcileLocked(tasks)
+        attached = true
+        for r in built where runs[r.id] === r { startTransferLocked(r) }
+        let pending = pendingSubmit
+        pendingSubmit.removeAll()
+        for (id, replan) in pending { submitLocked(id, replan: replan) }
+        pumpLocked()
+        flushBackgroundEventsLocked()
+    }
+
+    func urlSession(_ session: URLSession, downloadTask: URLSessionDownloadTask, didWriteData bytesWritten: Int64,
+                    totalBytesWritten: Int64, totalBytesExpectedToWrite: Int64) {
+        guard let tag = Tag(downloadTask.taskDescription), let r = runs[tag.id] else { return }
+        r.winBytes += bytesWritten
+        guard tag.index < 0, r.fileTask?.taskIdentifier == downloadTask.taskIdentifier else { return }
+        r.fileGot = totalBytesWritten
+        if totalBytesExpectedToWrite > 0 { r.fileTotal = totalBytesExpectedToWrite }
+        let now = Date().timeIntervalSince1970
+        r.tickSpeed(now)
+        guard now - r.lastEmit > 0.5 else { return }
+        r.lastEmit = now
+        let total = r.fileTotal, got = r.fileGot
+        let pct = total > 0 ? Int(min(99, got * 100 / total)) : 0
+        let size = total > 0 ? Downloads.human(Double(total)) : Downloads.human(Double(got))
+        emitLocked(r.id, ["progress": pct, "speed": r.speed, "size": size,
+                          "lastMessage": "\(pct)% of \(total > 0 ? size : "?")"], progressOnly: true)
+    }
+
+    /** The file only exists during this call: move it into the download's folder right away. */
+    func urlSession(_ session: URLSession, downloadTask: URLSessionDownloadTask, didFinishDownloadingTo location: URL) {
+        let tid = downloadTask.taskIdentifier
+        guard let tag = Tag(downloadTask.taskDescription), let e = findLocked(tag.id),
+              (e["status"] as? String) != "completed",
+              let ds = e["_dir"] as? String, !ds.isEmpty else { return }
+        let status = (downloadTask.response as? HTTPURLResponse)?.statusCode ?? 0
+        if status >= 400 {
+            outcomes[tid] = .http(status)
+            return
+        }
+        let dest = URL(fileURLWithPath: ds, isDirectory: true).appendingPathComponent(tag.rel)
+        guard isInside(dest.path) else { return }
+        let fm = FileManager.default
+        do {
+            try fm.createDirectory(at: dest.deletingLastPathComponent(), withIntermediateDirectories: true)
+            try? fm.removeItem(at: dest)
+            try fm.moveItem(at: location, to: dest)
+            outcomes[tid] = .ok(Downloads.sizeOf(dest))
+        } catch {
+            outcomes[tid] = .failed(error.localizedDescription)
+        }
+    }
+
+    private func bgCompletedLocked(_ task: URLSessionTask, _ error: Error?) {
+        let outcome = outcomes.removeValue(forKey: task.taskIdentifier)
+        guard let tag = Tag(task.taskDescription), let r = runs[tag.id] else { return }
+        let cancelled = (error as NSError?).map { $0.domain == NSURLErrorDomain && $0.code == NSURLErrorCancelled } ?? false
+        let now = Date().timeIntervalSince1970
+
+        if tag.index < 0 {
+            guard r.fileTask?.taskIdentifier == task.taskIdentifier else { return }
+            r.fileTask = nil
+            switch outcome {
+            case .ok?:
+                if Downloads.sizeOf(r.dir.appendingPathComponent(r.fileRel)) < 64 * 1024 {
+                    failRunLocked(r, "Server returned no video (file too small)")
+                } else {
+                    finishLocked(r)
+                }
+                return
+            case .http(let s)?:
+                failRunLocked(r, "HTTP \(s)")
+                return
+            default:
+                break
+            }
+            if let d = (error as NSError?)?.userInfo[NSURLSessionDownloadTaskResumeData] as? Data {
+                try? d.write(to: Downloads.resumeURL(r.dir), options: .atomic)
+            }
+            if !cancelled && networkAllowedLocked() {
+                let n = (r.attempts[-1] ?? 0) + 1
+                r.attempts[-1] = n
+                if n >= 5 {
+                    failRunLocked(r, error?.localizedDescription ?? "Download failed")
+                    return
+                }
+                r.retryAt[-1] = now + (bulk ? 0 : 2.0 * Double(n))
+            }
+            pumpLocked()
+            return
+        }
+
+        guard tag.index < r.segs.count else { return }
+        let i = tag.index
+        let mine = r.inflight[i]?.taskIdentifier == task.taskIdentifier
+        if mine { r.inflight[i] = nil }
+        if case .ok(let size)? = outcome {
+            if !r.done[i] {
+                r.done[i] = true
+                r.doneCount += 1
+                r.bytes += size
+                r.attempts[i] = nil
+                r.retryAt[i] = nil
+            }
+            segmentProgressLocked(r, now)
+            if r.doneCount == r.segs.count {
+                finishLocked(r)
+            } else {
+                pumpLocked()
+            }
+            return
+        }
+        guard mine else { return }
+        r.scan = min(r.scan, i)
+        if cancelled || !networkAllowedLocked() {
+            // stopped by the system / no network: queue it again without counting an attempt
+            pumpLocked()
+            return
+        }
+        let msg: String
+        switch outcome {
+        case .http(let s)?: msg = "HTTP \(s)"
+        case .failed(let m)?: msg = m
+        default: msg = error?.localizedDescription ?? "Download failed"
+        }
+        let n = (r.attempts[i] ?? 0) + 1
+        r.attempts[i] = n
+        if n >= 5 {
+            failRunLocked(r, "Fragment failed: \(msg)")
+            return
+        }
+        r.retryAt[i] = now + (bulk ? 0 : 0.6 * Double(n))
+        pumpLocked()
+    }
+
+    private func segmentProgressLocked(_ r: Run, _ now: TimeInterval) {
+        r.tickSpeed(now)
+        let d = r.doneCount, total = r.segs.count
+        let est = d > 0 ? Double(r.bytes) / Double(d) * Double(total) : 0
+        let pct = Int(min(99, floor(Double(d) * 100 / Double(max(1, total)))))
+        emitLocked(r.id, ["progress": pct, "completedFragments": d, "totalFragments": total, "speed": r.speed,
+                          "size": "~" + Downloads.human(est), "lastMessage": "Fragment \(d) / \(total)"], progressOnly: true)
+    }
+
+    private func failRunLocked(_ r: Run, _ msg: String) {
+        guard runs[r.id] === r else { return }
+        runs[r.id] = nil
+        cancelTasksLocked(r, keepResumeData: true)
+        if !networkAllowedLocked() {
+            emitLocked(r.id, ["status": "paused", "_autoResume": true, "speed": "", "lastMessage": waitReason])
+        } else {
+            emitLocked(r.id, ["status": "error", "lastMessage": "Error: \(msg)", "speed": ""])
+        }
+        pumpLocked()
+    }
+
+    /** Everything is there: write the playlist, mark the entry completed, tell the user. */
+    private func finishLocked(_ r: Run) {
+        guard runs[r.id] === r else { return }
+        runs[r.id] = nil
+        cancelTasksLocked(r, keepResumeData: false)
+        let finalPath: String
+        if r.kind == "file" {
+            finalPath = r.dir.appendingPathComponent(r.fileRel).path
+        } else {
+            let f = r.dir.appendingPathComponent(r.finalRel)
+            do {
+                try Downloads.write(f, r.finalText)
+            } catch {
+                emitLocked(r.id, ["status": "error", "lastMessage": "Error: \(error.localizedDescription)", "speed": ""])
+                return
+            }
+            finalPath = f.path
+        }
+        try? FileManager.default.removeItem(at: Downloads.planURL(r.dir))
+        try? FileManager.default.removeItem(at: Downloads.resumeURL(r.dir))
+        var patch: [String: Any] = ["subtitlePaths": r.subs, "status": "completed", "progress": 100, "filePath": finalPath,
+                                    "completedAt": Downloads.nowMs(), "lastMessage": "Completed", "speed": "",
+                                    "size": Downloads.human(Double(Downloads.sizeOf(r.dir)))]
+        if r.kind != "file" { patch["completedFragments"] = r.segs.count; patch["totalFragments"] = r.segs.count }
+        emitLocked(r.id, patch)
+        notifyFinished(r.id, r.name)
+        pumpLocked()
+    }
+
+    /** A notification when a download finishes while Vidra isn't on screen (permission is asked when a download starts). */
+    private func notifyFinished(_ id: String, _ name: String) {
+        DispatchQueue.main.async {
+            guard UIApplication.shared.applicationState != .active else { return }
+            let center = UNUserNotificationCenter.current()
+            center.getNotificationSettings { s in
+                guard s.authorizationStatus == .authorized || s.authorizationStatus == .provisional
+                    || s.authorizationStatus == .ephemeral else { return }
+                let c = UNMutableNotificationContent()
+                c.title = "Download finished"
+                c.body = name
+                c.sound = .default
+                center.add(UNNotificationRequest(identifier: "sbdl_" + id, content: c, trigger: nil))
+            }
+        }
+    }
+
     // ───────────────────────── HLS ─────────────────────────
 
     private static let attrRe = try! NSRegularExpression(pattern: "([A-Z0-9-]+)=(\"[^\"]*\"|[^,]*)")
@@ -878,10 +1428,18 @@ final class Downloads: NSObject, URLSessionDataDelegate {
         text.components(separatedBy: .newlines)
     }
 
-    private struct Seg { let url: String; let file: URL }
+    /** A file to download: its URL and its path relative to the download folder. */
+    private struct Seg { let url: String; let rel: String }
 
-    private func downloadHls(_ id: String, url: String, text: String, dir: URL, headers: [String: String], job: DownloadJob,
-                             maxHeight: Int, fallback: String?) throws -> String {
+    private struct HlsPlan {
+        var segs: [Seg]
+        var finalRel: String
+        var finalText: String
+    }
+
+    /** Picks the variant, writes the media playlists and returns what's left to download plus the final playlist. */
+    private func planHls(url: String, text: String, dir: URL, headers: [String: String], job: DownloadJob,
+                         maxHeight: Int, fallback: String?) throws -> HlsPlan {
         if text.contains("#EXT-X-STREAM-INF") {
             // master playlist → best variant (within the chosen quality)
             let ls = Downloads.lines(text)
@@ -938,21 +1496,18 @@ final class Downloads: NSObject, URLSessionDataDelegate {
                 guard let got = t else {
                     let (ft, fbase) = try fetchText(fb, headers: headers, job: job)
                     var s2: [Seg] = []
-                    let local = try planMedia(fbase, ft, dir: dir, out: &s2)
-                    try fetchAll(id, s2, headers: headers, job: job)
-                    let out = dir.appendingPathComponent("index.m3u8")
-                    try Downloads.write(out, local)
-                    return out.path
+                    let local = try planMedia(fbase, ft, dir: dir, prefix: "", out: &s2)
+                    return HlsPlan(segs: s2, finalRel: "index.m3u8", finalText: local)
                 }
                 vText = got
                 audioUrl = nil
             }
-            let vLocal = try planMedia(vUri, vText, dir: vDir, out: &segs)
+            let vLocal = try planMedia(vUri, vText, dir: vDir, prefix: "v/", out: &segs)
             try Downloads.write(vDir.appendingPathComponent("index.m3u8"), vLocal)
             if let au = audioUrl {
                 let aDir = dir.appendingPathComponent("a", isDirectory: true)
                 let (aText, aBase) = try fetchText(au, headers: headers, job: job)
-                let aLocal = try planMedia(aBase, aText, dir: aDir, out: &segs)
+                let aLocal = try planMedia(aBase, aText, dir: aDir, prefix: "a/", out: &segs)
                 try Downloads.write(aDir.appendingPathComponent("index.m3u8"), aLocal)
             }
             var m = "#EXTM3U\n"
@@ -964,23 +1519,17 @@ final class Downloads: NSObject, URLSessionDataDelegate {
                 si += ",AUDIO=\"aud\""
             }
             m += si + "\nv/index.m3u8\n"
-            try fetchAll(id, segs, headers: headers, job: job)
-            let master = dir.appendingPathComponent("index.m3u8")
-            try Downloads.write(master, m)
-            return master.path
+            return HlsPlan(segs: segs, finalRel: "index.m3u8", finalText: m)
         }
         var segs: [Seg] = []
-        let local = try planMedia(url, text, dir: dir, out: &segs)
-        try fetchAll(id, segs, headers: headers, job: job)
-        let out = dir.appendingPathComponent("index.m3u8")
-        try Downloads.write(out, local)
-        return out.path
+        let local = try planMedia(url, text, dir: dir, prefix: "", out: &segs)
+        return HlsPlan(segs: segs, finalRel: "index.m3u8", finalText: local)
     }
 
     private static let badExt: Set<String> = [".jpg", ".jpeg", ".png", ".gif", ".webp", ".html", ".js", ".css", ".txt", ".ico"]
 
-    /** Rewrites a media playlist to local files and queues every referenced resource. */
-    private func planMedia(_ base: String, _ text: String, dir: URL, out: inout [Seg]) throws -> String {
+    /** Rewrites a media playlist to local files and lists every referenced resource (`prefix`: its folder inside the download). */
+    private func planMedia(_ base: String, _ text: String, dir: URL, prefix: String, out: inout [Seg]) throws -> String {
         try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         var seen: [String: String] = [:]
         var sb = ""
@@ -1005,7 +1554,7 @@ final class Downloads: NSObject, URLSessionDataDelegate {
                             k += 1
                             let l = (t.hasPrefix("#EXT-X-MAP") ? "init" : "key") + "\(k).bin"
                             seen[a] = l
-                            out.append(Seg(url: a, file: dir.appendingPathComponent(l)))
+                            out.append(Seg(url: a, rel: prefix + l))
                             local = l
                         }
                         b += local!
@@ -1030,97 +1579,13 @@ final class Downloads: NSObject, URLSessionDataDelegate {
                 n += 1
                 let l = String(format: "s%05ld", n) + ext
                 seen[a] = l
-                out.append(Seg(url: a, file: dir.appendingPathComponent(l)))
+                out.append(Seg(url: a, rel: prefix + l))
                 local = l
             }
             sb += local! + "\n"
         }
         if !sb.contains("#EXT-X-ENDLIST") { sb += "#EXT-X-ENDLIST\n" }
         return sb
-    }
-
-    private func fetchAll(_ id: String, _ segs: [Seg], headers: [String: String], job: DownloadJob) throws {
-        let total = segs.count
-        let lock = NSLock()
-        var done = 0
-        var bytes: Int64 = 0
-        var winBytes: Int64 = 0
-        var winStart = Date().timeIntervalSince1970
-        var lastEmit: TimeInterval = 0
-        var speed = ""
-        var failure: Error?
-        emit(id, ["totalFragments": total, "lastMessage": "Fragment 0 / \(total)"])
-
-        let pool = OperationQueue()
-        pool.maxConcurrentOperationCount = 6
-        pool.qualityOfService = .utility
-        job.pool = pool
-        if job.cancelled { throw DownloadError("cancelled") }
-        let fm = FileManager.default
-
-        func segmentDone(_ size: Int64) {
-            lock.lock()
-            done += 1
-            bytes += size
-            let d = done
-            let now = Date().timeIntervalSince1970
-            var patch: [String: Any]?
-            if now - lastEmit > 0.5 || d == total {
-                lastEmit = now
-                if now - winStart > 1.5 {
-                    speed = String(format: "%.2f MB/s", Double(winBytes) / (now - winStart) / 1e6)
-                    winBytes = 0
-                    winStart = now
-                }
-                let est = d > 0 ? Double(bytes) / Double(d) * Double(total) : 0
-                let pct = Int(min(99, floor(Double(d) * 100 / Double(max(1, total)))))
-                patch = ["progress": pct, "completedFragments": d, "totalFragments": total, "speed": speed,
-                         "size": "~" + Downloads.human(est), "lastMessage": "Fragment \(d) / \(total)"]
-            }
-            lock.unlock()
-            if let p = patch, !job.cancelled { emit(id, p, progressOnly: true) }
-        }
-
-        for s in segs {
-            pool.addOperation { [weak self] in
-                guard let self = self else { return }
-                lock.lock(); let failed = failure != nil; lock.unlock()
-                if job.cancelled || failed { return }
-                if fm.fileExists(atPath: s.file.path), Downloads.sizeOf(s.file) > 0 {
-                    segmentDone(Downloads.sizeOf(s.file))
-                    return
-                }
-                let tmp = URL(fileURLWithPath: s.file.path + ".part")
-                var last: Error?
-                for attempt in 0..<5 {
-                    if job.cancelled { return }
-                    do {
-                        let r = try self.fetch(s.url, headers: headers, job: job, file: tmp, timeout: 20) { _, n in
-                            lock.lock(); winBytes += Int64(n); lock.unlock()
-                        }
-                        if r.status >= 400 { throw DownloadError("HTTP \(r.status)") }
-                        if !fm.fileExists(atPath: tmp.path) { fm.createFile(atPath: tmp.path, contents: nil) }
-                        try? fm.removeItem(at: s.file)
-                        try fm.moveItem(at: tmp, to: s.file)
-                        last = nil
-                        break
-                    } catch {
-                        last = error
-                        if job.cancelled { return }
-                        Thread.sleep(forTimeInterval: 0.6 * Double(attempt + 1))
-                    }
-                }
-                if let l = last {
-                    lock.lock(); if failure == nil { failure = l }; lock.unlock()
-                    return
-                }
-                segmentDone(Downloads.sizeOf(s.file))
-            }
-        }
-        pool.waitUntilAllOperationsAreFinished()
-        if job.cancelled { throw DownloadError("cancelled") }
-        lock.lock(); let f = failure; lock.unlock()
-        if let f = f { throw DownloadError("Fragment failed: \(f.localizedDescription)") }
     }
 
     static func write(_ f: URL, _ s: String) throws {
