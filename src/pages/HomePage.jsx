@@ -468,6 +468,27 @@ export default function HomePage({
           });
         }
 
+        // pinned rows: your watchlist / one of your lists
+        if (id === "watchlist" || id.startsWith("list:")) {
+          let title = "Your watchlist", items = [];
+          if (id === "watchlist") {
+            const order = storage.get("savedOrder") || Object.keys(saved || {});
+            items = order.map((k) => saved?.[k]).filter(Boolean);
+          } else {
+            let l = null;
+            try {
+              l = (JSON.parse(localStorage.getItem("streambert_customLists") || "{}") || {})[id.slice(5)];
+            } catch {}
+            if (!l) return null;
+            title = l.name;
+            items = Object.values(l.items || {}).sort((a, b) => (b.addedAt || 0) - (a.addedAt || 0));
+          }
+          items = items.filter((x) => x?.id).map((x) => ({ ...x, name: x.title }));
+          if (!items.length) return null;
+          if (viewMode === "list") return renderList(id, title, null, items);
+          return <TrendingCarousel key={id} items={items} title={title} onSelect={onSelect} ratingsMap={enrichedRatingsMap} />;
+        }
+
         if (id === "topRated") {
           if (topRatedItems.length === 0) return null;
           if (viewMode === "list")
@@ -485,6 +506,26 @@ export default function HomePage({
 
         return null;
       })}
+      <div className="sb-home-customize">
+        <button
+          className="btn btn-ghost btn--sm"
+          onClick={() => {
+            window.__sbNav?.go?.("settings");
+            // open the Home layout section
+            let n = 0;
+            const t = setInterval(() => {
+              const el = [...document.querySelectorAll(".settings-section-title")].find((e) => e.textContent.trim() === "Home Page Layout");
+              if (el || ++n > 30) {
+                clearInterval(t);
+                // Settings keeps growing while it loads: scroll again a few times
+                if (el) [0, 400, 1000, 1800].forEach((ms) => setTimeout(() => el.scrollIntoView({ block: "start" }), ms));
+              }
+            }, 100);
+          }}
+        >
+          ⚙ Customize Home
+        </button>
+      </div>
     </div>
   );
 }

@@ -18,6 +18,25 @@ export const HOME_ROWS = [
   { id: "topRated", label: "Top Rated" },
 ];
 
+/** your own lists, read straight from storage (libraryExtras keeps them) */
+function customLists() {
+  try {
+    const l = JSON.parse(localStorage.getItem("streambert_customLists") || "{}") || {};
+    return Object.values(l).filter((x) => x && x.id).sort((a, b) => (a.createdAt || 0) - (b.createdAt || 0));
+  } catch {
+    return [];
+  }
+}
+
+/** every row Home can show: the built-in ones, your watchlist and each of your lists */
+export function allHomeRows() {
+  return [
+    ...HOME_ROWS,
+    { id: "watchlist", label: "📌 Your watchlist", pinnable: true },
+    ...customLists().map((l) => ({ id: `list:${l.id}`, label: `📌 ${l.name}`, pinnable: true })),
+  ];
+}
+
 const DEFAULT_ROW_ORDER = HOME_ROWS.map((r) => r.id);
 const DEFAULT_ROW_VISIBLE = Object.fromEntries(
   HOME_ROWS.map((r) => [r.id, true]),
@@ -26,18 +45,20 @@ const DEFAULT_ROW_VISIBLE = Object.fromEntries(
 export function loadHomeLayout() {
   const savedOrder = storage.get("homeRowOrder");
   const savedVisible = storage.get("homeRowVisible");
-  const knownIds = new Set(HOME_ROWS.map((r) => r.id));
+  const rows = allHomeRows();
+  const knownIds = new Set(rows.map((r) => r.id));
+  // pinned rows (watchlist, your lists) are off until you turn them on
+  const defaults = Object.fromEntries(rows.map((r) => [r.id, !r.pinnable]));
+  const all = rows.map((r) => r.id);
 
   const order = savedOrder
     ? [
         ...savedOrder.filter((id) => knownIds.has(id)),
-        ...DEFAULT_ROW_ORDER.filter((id) => !savedOrder.includes(id)),
+        ...all.filter((id) => !savedOrder.includes(id)),
       ]
-    : DEFAULT_ROW_ORDER;
+    : all;
 
-  const visible = savedVisible
-    ? { ...DEFAULT_ROW_VISIBLE, ...savedVisible }
-    : DEFAULT_ROW_VISIBLE;
+  const visible = { ...defaults, ...(savedVisible || {}) };
 
   return { order, visible };
 }

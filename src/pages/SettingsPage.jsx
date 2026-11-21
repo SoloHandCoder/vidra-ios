@@ -34,6 +34,7 @@ import {
 } from "../utils/updates";
 import {
   HOME_ROWS,
+  allHomeRows,
   loadHomeLayout,
   loadHomeViewMode,
   saveHomeViewMode,
@@ -792,7 +793,7 @@ function HomeLayoutSection() {
     setTimeout(() => setSaved(false), 2000);
   };
 
-  const rowLabels = Object.fromEntries(HOME_ROWS.map((r) => [r.id, r.label]));
+  const rowLabels = Object.fromEntries(allHomeRows().map((r) => [r.id, r.label]));
 
   return (
     <div style={{ marginBottom: 40 }}>
@@ -806,7 +807,8 @@ function HomeLayoutSection() {
         }}
       >
         Choose which rows appear on the Home page and drag to reorder them. The
-        hero banner is always shown at the top.
+        hero banner is always shown at the top. Turn on 📌 rows to pin your
+        watchlist or one of your lists to Home.
       </div>
 
       {/* ── View mode selector ── */}

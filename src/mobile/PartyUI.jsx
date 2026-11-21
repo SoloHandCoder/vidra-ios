@@ -101,7 +101,7 @@ const mediaLabel = (m) => (m ? `${m.title || ""}${m.media_type === "tv" && m.sea
 
 async function shareInvite(code) {
   const link = inviteLink(code);
-  const text = `Join my Vidra watch party! ${link}\nOr open Vidra → Watch party → Join and enter ${code}`;
+  const text = `Join my Vidra watch party! 🍿 ${link}\nOr open Vidra → Watch party → Join and enter ${code}`;
   if (window.electron?.shareText) {
     try {
       await window.electron.shareText({ text });
@@ -231,6 +231,7 @@ export function PartyDock() {
   }, [p?.ready, p?.ready?.meReady]);
 
   const start = async (joinCode, who) => {
+    if (joinCode) joinCode = codeFromLink(joinCode) || joinCode;
     setErr("");
     setBusy(joinCode ? "join" : "start");
     const n = (who ?? name).trim() || "Me";

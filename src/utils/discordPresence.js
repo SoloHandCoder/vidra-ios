@@ -4,10 +4,12 @@
 
 import { storage, STORAGE_KEYS, isElectron } from "./storage";
 
-// Small badge shown as the "small_image" next to the cover.
-const APP_ICON_URL =
-  "https://raw.githubusercontent.com/truelockmc/streambert/main/public/icon.png";
-const GITHUB_URL = "https://github.com/truelockmc/streambert";
+// Art assets uploaded to the Vidra app on the Discord Developer Portal
+// (Rich Presence → Art Assets): the app icon, and a small round badge shown
+// next to the poster.
+const APP_ICON = "vidra";
+const APP_BADGE = "vidra_badge";
+const GITHUB_URL = "https://github.com/SoloHandCoder/vidra-desktop";
 
 export function readDiscordRpcSettings() {
   return {
@@ -29,17 +31,17 @@ function baseAssets(posterUrl, settings) {
   const assets = {};
   if (settings.showCover && posterUrl) {
     assets.large_image = posterUrl;
-    assets.small_image = APP_ICON_URL;
+    assets.small_image = APP_BADGE;
     assets.small_text = "Vidra";
   } else {
-    assets.large_image = APP_ICON_URL;
+    assets.large_image = APP_ICON;
   }
   return assets;
 }
 
 function buttons(settings) {
   return settings.showButton
-    ? [{ label: "Watch media for free", url: GITHUB_URL }]
+    ? [{ label: "Get Vidra", url: GITHUB_URL }]
     : undefined;
 }
 
@@ -79,7 +81,7 @@ export function sendIdleActivity(settings) {
   const activity = {
     type: 3,
     details: "Idling",
-    assets: { large_image: APP_ICON_URL, large_text: "Vidra" },
+    assets: { large_image: APP_ICON, large_text: "Vidra" },
   };
   const btns = buttons(settings);
   if (btns) activity.buttons = btns;

@@ -128,6 +128,7 @@ async function pollOnce() {
   }
   lastFrame = state ? frame : null;
   curT = state?.t || 0;
+  lastState = state ? { t: state.t || 0, d: state.d || 0, playing: !state.paused, at: Date.now() } : null;
   if (state) styleEmbedded(frame);
   // in-app fullscreen only for the Movie/TV page player
   const want = !!frame?.closest?.(".player-wrap");
@@ -186,6 +187,11 @@ async function pollOnce() {
     try { await P.setPlaybackState(payload); } catch {}
   }
 }
+
+// where the player is + jump to a time (used by "Skip intro"), for any source
+let lastState = null;
+window.__sbPlayerState = () => (lastState && Date.now() - lastState.at < 3500 ? lastState : null);
+window.__sbSeekPlayer = (t) => command("seek", t);
 
 // watch party: follow what the others do
 setPartyPlayer(async ({ playing, t }) => {

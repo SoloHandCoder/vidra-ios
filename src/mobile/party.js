@@ -56,11 +56,14 @@ export const prettyCode = (c) => {
   return s.length > 5 ? `${s.slice(0, 5)}-${s.slice(5)}` : s;
 };
 
-/** the link that opens Vidra straight into this party */
-export const inviteLink = (code) => `vidra://party/${prettyCode(code)}`;
+/** web page that opens Vidra straight into this party (tappable in any chat app) */
+export const INVITE_PAGE = "https://solohandcoder.github.io/vidra-desktop/join/";
+export const inviteLink = (code) => `${INVITE_PAGE}#${prettyCode(code)}`;
+/** the app link itself (what the invite page opens) */
+export const appLink = (code) => `vidra://party/${prettyCode(code)}`;
 /** party code from an invite link / text, or null */
 export function codeFromLink(text) {
-  const m = String(text || "").match(/(?:(?:streambert|vidra):\/\/party\/|[?#&]party=|\/join\/?#)([A-Za-z0-9]{5}-?[A-Za-z0-9]{5})/);
+  const m = String(text || "").match(/(?:(?:streambert|vidra):\/\/party\/|[?#&](?:party|code)=|\/join\/?#)([A-Za-z0-9]{5}-?[A-Za-z0-9]{5})/);
   return m ? prettyCode(m[1]) : null;
 }
 

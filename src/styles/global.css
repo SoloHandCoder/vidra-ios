@@ -4058,3 +4058,35 @@ html[data-win-titlebar][data-maximized] .main {
 .episode-check-item:hover {
     color: var(--text) !important;
 }
+
+/* ── Spoiler shield (episodes you haven't watched) ───────────────────────── */
+.sb-spoiler-toggle { margin: 0 0 10px; }
+.sb-spoiler-toggle.on { color: var(--text); border-color: var(--red); }
+.spoiler-on .episode-card:not(.ep-watched):not(.ep-started):not(.playing) .episode-thumb img {
+  filter: blur(14px) saturate(0.7) brightness(0.8);
+  transform: scale(1.12);
+  transition: filter 0.25s, transform 0.25s;
+}
+.spoiler-on .episode-card:not(.ep-watched):not(.ep-started):not(.playing) .episode-name,
+.spoiler-on .episode-card:not(.ep-watched):not(.ep-started):not(.playing) .episode-desc {
+  filter: blur(5px);
+  user-select: none;
+  transition: filter 0.25s;
+}
+@media (hover: hover) {
+  .spoiler-on .episode-card:hover .episode-thumb img,
+  .spoiler-on .episode-card:hover .episode-name,
+  .spoiler-on .episode-card:hover .episode-desc { filter: none !important; transform: none !important; }
+}
+
+/* ── Learned "Skip intro" button over the player ─────────────────────────── */
+.sb-skip { position: absolute; right: 18px; bottom: 74px; z-index: 30; display: flex; gap: 6px; align-items: center; animation: sbSkipIn 0.3s ease-out backwards; }
+.sb-skip-btn { padding: 10px 18px; border-radius: 10px; border: 1px solid rgba(255, 255, 255, 0.35); background: rgba(12, 12, 14, 0.82); color: #fff; font: 700 15px var(--font-body); cursor: pointer; backdrop-filter: blur(6px); }
+.sb-skip-btn:hover { background: rgba(255, 255, 255, 0.16); }
+.sb-skip-x { width: 30px; height: 30px; border-radius: 50%; border: none; background: rgba(12, 12, 14, 0.7); color: #ddd; cursor: pointer; font-size: 13px; }
+@keyframes sbSkipIn { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
+html[data-mobile] .sb-skip { right: 10px; bottom: 56px; }
+html[data-mobile] .sb-skip-btn { padding: 9px 14px; font-size: 14px; }
+
+/* ── "Customize Home" at the end of Home ─────────────────────────────────── */
+.sb-home-customize { display: flex; justify-content: center; padding: 18px 0 40px; }

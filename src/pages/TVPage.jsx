@@ -68,6 +68,7 @@ import {
   clearFailoverSource,
 } from "../utils/storage";
 import { useAutoplay } from "../utils/useAutoplay";
+import { forgetSkip, learnedSkip, noteSkip } from "../mobile/introSkip";
 import { UpNextCard } from "../mobile/UpNext";
 import { fetchAniSkipTimings } from "../utils/aniSkip";
 import {
@@ -501,6 +502,11 @@ export default function TVPage({
   // AniSkip
   const [skipTimings, setSkipTimings] = useState(null); // { intro?, outro? }
   const [skipPrompt, setSkipPrompt] = useState(null); // "intro" | "outro" | null
+  // Learned "Skip intro" (shows without AniSkip data): { end, kind } while inside it
+  const [learnedPrompt, setLearnedPrompt] = useState(null);
+  const learnedSkipRef = useRef({ seekedAt: 0, autoDone: false, dismissed: false });
+  // Spoiler shield: blur pictures, titles and descriptions of episodes you haven't watched
+  const [spoilerShield, setSpoilerShield] = useState(() => !!storage.get("spoilerShield"));
   const [introSkipMode] = useState(
     () => storage.get(STORAGE_KEYS.INTRO_SKIP_MODE) || "off",
   );
@@ -1368,6 +1374,44 @@ export default function TVPage({
     return () => wv.removeEventListener("before-input-event", handler);
   }, [skipPrompt, handleManualSkip]);
 
+  // Learned "Skip intro": watch for forward jumps near the start and offer the
+  // learned skip in later episodes. AniSkip (anime) has its own timings.
+  useEffect(() => {
+    setLearnedPrompt(null);
+    learnedSkipRef.current = { seekedAt: 0, autoDone: false, dismissed: false };
+    if (!playing || !item?.id || !selectedEp) return;
+    if (skipTimings && isAsync) return;
+    const epKey = `s${selectedSeason}e${selectedEp.episode_number}`;
+    let prev = null;
+    const iv = setInterval(() => {
+      const st = window.__sbPlayerState?.();
+      if (!st || !(st.d > 0)) return;
+      const now = Date.now();
+      const ref = learnedSkipRef.current;
+      if (prev && now - ref.seekedAt > 3000) {
+        const expected = prev.t + (prev.playing ? (now - prev.at) / 1000 : 0);
+        if (st.t - expected > 20) noteSkip(item.id, epKey, prev.t, st.t);
+      }
+      prev = st.at === prev?.at ? prev : { ...st, at: now };
+      const L = learnedSkip(item.id); // a button even when AniSkip auto-skipping is off
+      if (L && st.t >= L.start - 2 && st.t < L.end - 3) {
+        if (introSkipMode === "auto" && !ref.autoDone) {
+          ref.autoDone = true;
+          ref.seekedAt = now;
+          window.__sbSeekPlayer?.(L.end);
+        } else if (!ref.dismissed) setLearnedPrompt({ end: L.end, kind: L.kind });
+      } else setLearnedPrompt(null);
+    }, 1000);
+    return () => clearInterval(iv);
+  }, [playing, item?.id, selectedEp, selectedSeason, skipTimings, isAsync, introSkipMode]);
+
+  const skipLearned = useCallback(() => {
+    if (!learnedPrompt) return;
+    learnedSkipRef.current.seekedAt = Date.now();
+    window.__sbSeekPlayer?.(learnedPrompt.end);
+    setLearnedPrompt(null);
+  }, [learnedPrompt]);
+
   // Unified progress/skip timing tick for HiAnime and other sources.
   // Skip detection runs every tick, progress is saved every 5th tick (5s).
   useEffect(() => {
@@ -2106,6 +2150,25 @@ export default function TVPage({
                     </button>
                   </div>
                 )}
+                {learnedPrompt && (
+                  <div className="sb-skip">
+                    <button className="sb-skip-btn" onClick={skipLearned}>
+                      {learnedPrompt.kind === "recap" ? "Skip recap" : "Skip intro"} ⏭
+                    </button>
+                    <button
+                      className="sb-skip-x"
+                      title="Hide (Shift+click: forget the intro for this show)"
+                      aria-label="Dismiss"
+                      onClick={(e) => {
+                        learnedSkipRef.current.dismissed = true;
+                        setLearnedPrompt(null);
+                        if (e.shiftKey || e.altKey) forgetSkip(item.id);
+                      }}
+                    >
+                      ✕
+                    </button>
+                  </div>
+                )}
                 {autoplayCountdown !== null && (upNextQueue || nextEp) && (
                   <UpNextCard
                     countdown={autoplayCountdown}
@@ -2607,9 +2670,22 @@ export default function TVPage({
                   Download season {selectedSeason}
                 </button>
               )}
+            {!loadingSeason && (seasonData?.episodes || episodeGroupCurrentEpisodes?.length) && (
+              <button
+                className={`btn btn-ghost btn--sm sb-spoiler-toggle${spoilerShield ? " on" : ""}`}
+                onClick={() => {
+                  const next = !spoilerShield;
+                  setSpoilerShield(next);
+                  storage.set("spoilerShield", next);
+                }}
+                title="Blur pictures, titles and descriptions of episodes you haven't watched yet"
+              >
+                {spoilerShield ? "🙈 Spoilers hidden" : "👁 Hide spoilers"}
+              </button>
+            )}
             {!loadingSeason &&
               (seasonData?.episodes || episodeGroupCurrentEpisodes?.length) && (
-                <div className="episodes-grid">
+                <div className={`episodes-grid${spoilerShield ? " spoiler-on" : ""}`}>
                   {currentSeasonEpisodes.map((ep) => {
                     const pk = `tv_${item.id}_s${selectedSeason}e${ep.episode_number}`;
                     return (
@@ -2744,7 +2820,7 @@ const EpisodeCard = memo(function EpisodeCard({
 
   return (
     <div
-      className={`episode-card ${isPlaying ? "playing" : ""} ${epWatched ? "ep-watched" : ""} ${restricted ? "episode-card--restricted" : ""} ${epUnreleased ? "episode-card--unreleased" : ""}`}
+      className={`episode-card ${isPlaying ? "playing" : ""} ${epWatched ? "ep-watched" : ""} ${epPct > 0 ? "ep-started" : ""} ${restricted ? "episode-card--restricted" : ""} ${epUnreleased ? "episode-card--unreleased" : ""}`}
       onClick={() => (restricted || epUnreleased ? null : onPlay(ep))}
       onContextMenu={(e) => {
         e.preventDefault();

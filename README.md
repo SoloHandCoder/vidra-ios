@@ -14,7 +14,7 @@
 </p>
 
 <p align="center">
-  Also on <a href="https://github.com/SoloHandCoder/vidra-android"><b>Android</b></a> and <a href="https://github.com/SoloHandCoder/vidra-desktop"><b>Windows</b></a>. Your library syncs between all of them.
+  Also on <a href="https://github.com/SoloHandCoder/vidra-android"><b>Android</b></a> and <a href="https://github.com/SoloHandCoder/vidra-desktop"><b>Windows, Mac &amp; Linux</b></a>. Your library syncs between all of them.
 </p>
 
 <p align="center">
