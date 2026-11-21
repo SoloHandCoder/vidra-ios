@@ -216,7 +216,13 @@ export function initCloudSync() {
   const auto = () => getStatus().connected && getStatus().auto && syncNow();
   setTimeout(auto, 5000);
   setInterval(auto, AUTO_MS);
+  let lastBack = 0;
   document.addEventListener("visibilitychange", () => {
     if (document.hidden) auto();
+    // back in the app: pick up what happened on your other devices
+    else if (Date.now() - lastBack > 60000) {
+      lastBack = Date.now();
+      auto();
+    }
   });
 }

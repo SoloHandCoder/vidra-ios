@@ -10,6 +10,7 @@ import { allFrames, execInFrame } from "./MobileWebView.jsx";
 import { trackWatchSecond } from "./libraryExtras.js";
 import { traktScrobble } from "./trakt.js";
 import { reportPlayer, setPartyPlayer } from "./party.js";
+import { noteWatching } from "./handoff.js";
 
 const P = native.plugin;
 
@@ -158,6 +159,7 @@ async function pollOnce() {
     const epw = window.__sbNav?.watching?.();
     if (pm && pm.media_type === "tv") pm = { ...pm, season: epw?.season, episode: epw?.episode };
     reportPlayer(pm ? { id: pm.id, media_type: pm.media_type, title: pm.title, season: pm.season, episode: pm.episode } : null, active ? { playing, t: state.t || 0 } : null);
+    if (pm && active && !frame?.hasAttribute?.("data-sb-local-player")) noteWatching(pm, { playing, t: state.t || 0, d: state.d || 0 });
   }
   if (active) {
     const info = watchInfo(frame);

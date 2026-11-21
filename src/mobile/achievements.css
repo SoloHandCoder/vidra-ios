@@ -1,0 +1,45 @@
+.sbac-count { font-size: 13px; font-weight: 600; }
+.sbac-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 10px; }
+.sbac {
+  position: relative;
+  padding: 12px;
+  border-radius: 12px;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+.sbac-emoji { font-size: 28px; line-height: 1; filter: grayscale(1); opacity: 0.45; }
+.sbac-name { font-size: 14px; font-weight: 700; color: var(--text2); }
+.sbac-how { font-size: 12px; color: var(--text3); line-height: 1.35; }
+.sbac.done { border-color: color-mix(in srgb, var(--red) 55%, var(--border)); background: color-mix(in srgb, var(--red) 9%, var(--surface)); }
+.sbac.done .sbac-emoji { filter: none; opacity: 1; }
+.sbac.done .sbac-name { color: var(--text); }
+.sbac-bar { height: 4px; border-radius: 2px; background: var(--surface3); overflow: hidden; margin-top: 4px; }
+.sbac-bar span { display: block; height: 100%; background: var(--red); transform-origin: left center; }
+.sbac-toast {
+  position: fixed;
+  top: 18px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 2147483600;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 18px 10px 12px;
+  border-radius: 16px;
+  border: 1px solid color-mix(in srgb, var(--red) 60%, var(--border));
+  background: var(--surface);
+  color: var(--text);
+  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.45);
+  animation: sbacIn 0.45s var(--sb-ease-spring, ease) backwards, sbacOut 0.35s ease-in 3.8s forwards;
+}
+.sbac-toast-emoji { font-size: 30px; }
+.sbac-toast-kicker { font-size: 11px; font-weight: 800; letter-spacing: 0.6px; text-transform: uppercase; color: var(--red); }
+.sbac-toast-name { font-size: 15px; font-weight: 700; }
+@keyframes sbacIn { from { opacity: 0; transform: translate(-50%, -16px) scale(0.9); } to { opacity: 1; transform: translate(-50%, 0); } }
+@keyframes sbacOut { to { opacity: 0; transform: translate(-50%, -10px); } }
+html[data-mobile] .sbac-toast { top: calc(env(safe-area-inset-top, 0px) + 12px); }
+html[data-mobile] .sbac-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }

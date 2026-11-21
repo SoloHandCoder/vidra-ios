@@ -1,3 +1,5 @@
+import { AchievementToaster } from "./mobile/achievements";
+import { HandoffCard } from "./mobile/HandoffCard";
 import { PartyDock, PartyReactions } from "./mobile/PartyUI";
 import { traktMarkWatched } from "./mobile/trakt.js";
 import KidsGate from "./mobile/KidsGate";
@@ -1377,6 +1379,8 @@ export default function App() {
         {toast && <div className="toast">{toast}</div>}
         <PartyDock />
         <PartyReactions />
+        <HandoffCard />
+        <AchievementToaster />
 
         {/* ── Episode check status pill / result card ── */}
         {episodeCheckStatus && (

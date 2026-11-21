@@ -91,6 +91,7 @@ export function mergeProfile(base = {}, local = {}, remote = {}) {
   for (const k of new Set([...Object.keys(base), ...Object.keys(local), ...Object.keys(remote)])) {
     let v;
     if (k === "history") v = mergeHistory(base[k], local[k], remote[k]);
+    else if (k === "lastPlayed") v = (remote[k]?.at || 0) > (local[k]?.at || 0) ? remote[k] : local[k] ?? remote[k];
     else if (k === "customLists") v = mergeLists(base[k], local[k], remote[k]);
     else if (k === "watchStats") v = mergeStats(base[k], local[k], remote[k]);
     else if (MAP_KEYS.has(k)) v = mergeMap(base[k], local[k], remote[k]);

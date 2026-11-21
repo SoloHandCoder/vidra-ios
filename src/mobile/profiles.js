@@ -10,6 +10,8 @@ const DATA = (id) => `__sb_profile_data_${id}`;
 
 /** keys that belong to a person (everything else is a shared setting) */
 const PERSONAL_KEYS = [
+  "lastPlayed", // continue on another device
+  "achvSeen", // achievements you've already been told about
   "saved",
   "savedOrder",
   "progress",

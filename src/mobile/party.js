@@ -164,6 +164,10 @@ export async function joinParty(code, name) {
   };
   S.joinedAt = Date.now();
   S.host = starting ? S.me : null;
+  try {
+    localStorage.setItem("__sb_parties", String(Number(localStorage.getItem("__sb_parties") || 0) + 1));
+    window.dispatchEvent(new Event("streambert:check-achievements"));
+  } catch {}
   S.members.set(S.me, { id: S.me, name: S.name, joinedAt: S.joinedAt, me: true });
   emit();
   const mine = S;
