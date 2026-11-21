@@ -254,3 +254,6 @@ html[data-mobile] .sbpt-code-row .btn { flex: 1; justify-content: center; }
 .sbpt-poll-form .sbx-input { font-size: 13px; }
 html[data-theme-kind="light"] .sbpt-host-tag { color: #9a6a00; }
 html[data-theme-kind="light"] .sbpt-member.host { border-color: #c99a1a; }
+/* code on its own row, the buttons share the row below (fits the narrow panel) */
+.sbpt-code-row > div:first-child { flex-basis: 100%; }
+.sbpt-code-row .btn { flex: 1; justify-content: center; }
