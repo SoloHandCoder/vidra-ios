@@ -1,7 +1,8 @@
 // iOS side of the app's native plugin ("Vidra"). Same method names as the
 // Android plugin (StreambertPlugin.java) so the shared JS works unchanged.
 // What's not possible / not built on iOS yet resolves with a harmless default
-// (downloads, Chromecast, widgets, background episode checks, voice search).
+// (Chromecast, widgets, background episode checks, voice search).
+// Downloads: Downloads.swift; playing them: LocalPlayer.swift.
 import AVFoundation
 import Capacitor
 import Foundation
@@ -24,7 +25,7 @@ public class StreambertPlugin: CAPPlugin, CAPBridgedPlugin, UNUserNotificationCe
         "setPlaybackState", "updateWidget", "pinWidget", "getLockSettings", "shareImage", "shareText", "verifyUser",
         "setLockSettings", "syncEpisodeWatch", "getEpisodeState", "runEpisodeCheckNow", "setInterceptFullscreen",
         "enterPip", "setBrightness", "setVolume", "getLevels", "getDeviceInfo", "takeIncoming", "installUpdate",
-        "cancelUpdate",
+        "cancelUpdate", "playLocal",
     ].map { CAPPluginMethod(name: $0, returnType: CAPPluginReturnPromise) }
 
     static let releasesPage = "https://github.com/SoloHandCoder/vidra-ios/releases/latest"
@@ -50,6 +51,11 @@ public class StreambertPlugin: CAPPlugin, CAPBridgedPlugin, UNUserNotificationCe
         installFrameScript()
         installAdBlock()
         lock.attach(to: bridge?.viewController)
+        Downloads.shared.onProgress = { [weak self] entry in
+            self?.notifyListeners("downloadProgress", data: entry)
+        }
+        // continue downloads interrupted by the app being closed
+        DispatchQueue.global().asyncAfter(deadline: .now() + 3) { Downloads.shared.resumeAuto() }
     }
 
     // Every frame (embedded players too) gets the same helper script as on Android:
@@ -174,8 +180,20 @@ public class StreambertPlugin: CAPPlugin, CAPBridgedPlugin, UNUserNotificationCe
         let exts: Set<String> = ["mp4", "mkv", "webm", "mov", "m4v", "ts"]
         var out: [[String: Any]] = []
         let root = URL(fileURLWithPath: call.getString("path") ?? "")
-        if let e = fm.enumerator(at: root, includingPropertiesForKeys: [.fileSizeKey]) {
-            for case let u as URL in e where exts.contains(u.pathExtension.lowercased()) {
+        if let e = fm.enumerator(at: root, includingPropertiesForKeys: [.fileSizeKey, .isDirectoryKey]) {
+            for case let u as URL in e {
+                if (try? u.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) == true {
+                    // a downloaded HLS folder (index.m3u8 + segments) counts as one video
+                    let index = u.appendingPathComponent("index.m3u8")
+                    if fm.fileExists(atPath: index.path) {
+                        e.skipDescendants()
+                        out.append(["filePath": index.path, "name": u.lastPathComponent,
+                                    "size": ByteCountFormatter.string(fromByteCount: Downloads.sizeOf(u), countStyle: .file),
+                                    "ext": ".m3u8"])
+                    }
+                    continue
+                }
+                guard exts.contains(u.pathExtension.lowercased()) else { continue }
                 let size = (try? u.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0
                 out.append(["filePath": u.path, "name": u.deletingPathExtension().lastPathComponent,
                             "size": ByteCountFormatter.string(fromByteCount: Int64(size), countStyle: .file),
@@ -191,20 +209,102 @@ public class StreambertPlugin: CAPPlugin, CAPBridgedPlugin, UNUserNotificationCe
         call.resolve(["seconds": s.isFinite ? s : 0])
     }
 
-    // ───────────── downloads (not in the iOS version yet) ─────────────
-    private let noDownloads = "Downloads aren't available in the iOS version yet."
-    @objc func startDownload(_ call: CAPPluginCall) { call.resolve(["ok": false, "error": noDownloads]) }
-    @objc func pauseDownload(_ call: CAPPluginCall) { call.resolve(["ok": true]) }
-    @objc func resumeDownload(_ call: CAPPluginCall) { call.resolve(["ok": true]) }
-    @objc func getDownloadSettings(_ call: CAPPluginCall) { call.resolve([:]) }
-    @objc func setDownloadSettings(_ call: CAPPluginCall) { call.resolve([:]) }
-    @objc func pickDownloadFolder(_ call: CAPPluginCall) { call.reject(noDownloads) }
-    @objc func getDownloads(_ call: CAPPluginCall) { call.resolve(["list": []]) }
-    @objc func deleteDownload(_ call: CAPPluginCall) { call.resolve(["ok": true]) }
-    @objc func deleteAllDownloads(_ call: CAPPluginCall) { call.resolve(["ok": true]) }
-    @objc func clearDownloadRegistry(_ call: CAPPluginCall) { call.resolve(["ok": true]) }
-    @objc func updateDownload(_ call: CAPPluginCall) { call.resolve(["ok": true]) }
-    @objc func getDownloadsSize(_ call: CAPPluginCall) { call.resolve(["bytes": 0]) }
+    // ───────────── downloads (Downloads.swift) ─────────────
+    private func options(_ call: CAPPluginCall, _ key: String? = nil) -> [String: Any] {
+        let all = (call.options as? [String: Any]) ?? [:]
+        guard let k = key else { return all }
+        return (all[k] as? [String: Any]) ?? [:]
+    }
+
+    @objc func startDownload(_ call: CAPPluginCall) {
+        let args = options(call)
+        var headers: [String: String] = [:]
+        for (k, v) in options(call, "headers") { headers[k] = "\(v)" }
+        let begin = {
+            let id = Downloads.shared.start(args, headers: headers)
+            call.resolve(["ok": true, "id": id])
+        }
+        DispatchQueue.main.async {
+            guard let web = self.bridge?.webView else { return DispatchQueue.global().async(execute: begin) }
+            // copy the web view's cookies (some stream hosts need them) and use its user agent
+            web.configuration.websiteDataStore.httpCookieStore.getAllCookies { cookies in
+                cookies.forEach { HTTPCookieStorage.shared.setCookie($0) }
+                if Downloads.shared.userAgent != nil { return DispatchQueue.global().async(execute: begin) }
+                web.evaluateJavaScript("navigator.userAgent") { ua, _ in
+                    if let ua = ua as? String, !ua.isEmpty { Downloads.shared.userAgent = ua }
+                    DispatchQueue.global().async(execute: begin)
+                }
+            }
+        }
+    }
+
+    @objc func pauseDownload(_ call: CAPPluginCall) {
+        Downloads.shared.pause(call.getString("id") ?? "")
+        call.resolve()
+    }
+
+    @objc func resumeDownload(_ call: CAPPluginCall) {
+        Downloads.shared.resume(call.getString("id") ?? "")
+        call.resolve()
+    }
+
+    private func downloadSettings() -> [String: Any] {
+        // iOS: always the app's own Downloads folder (visible in the Files app), no MP4 conversion
+        ["wifiOnly": Downloads.shared.wifiOnly, "convertMp4": false, "location": "app", "folderName": NSNull(),
+         "moviesPath": Downloads.shared.baseDir.path, "networkAllowed": Downloads.shared.networkAllowed, "ios": true]
+    }
+
+    @objc func getDownloadSettings(_ call: CAPPluginCall) { call.resolve(downloadSettings()) }
+
+    @objc func setDownloadSettings(_ call: CAPPluginCall) {
+        if let w = call.getBool("wifiOnly") { Downloads.shared.wifiOnly = w }
+        call.resolve(downloadSettings())
+    }
+
+    @objc func pickDownloadFolder(_ call: CAPPluginCall) { call.resolve(["ok": false]) }
+
+    @objc func getDownloads(_ call: CAPPluginCall) { call.resolve(["list": Downloads.shared.all()]) }
+
+    @objc func deleteDownload(_ call: CAPPluginCall) {
+        Downloads.shared.delete(call.getString("id") ?? "", deleteFiles: call.getBool("deleteFiles") ?? true)
+        call.resolve(["ok": true])
+    }
+
+    @objc func deleteAllDownloads(_ call: CAPPluginCall) {
+        DispatchQueue.global().async {
+            let n = Downloads.shared.deleteAll()
+            call.resolve(["ok": true, "deleted": n, "errors": 0])
+        }
+    }
+
+    @objc func clearDownloadRegistry(_ call: CAPPluginCall) {
+        Downloads.shared.clearRegistry()
+        call.resolve()
+    }
+
+    @objc func updateDownload(_ call: CAPPluginCall) {
+        call.resolve(["ok": Downloads.shared.update(call.getString("id") ?? "", options(call, "patch"))])
+    }
+
+    @objc func getDownloadsSize(_ call: CAPPluginCall) {
+        DispatchQueue.global().async { call.resolve(["bytes": Downloads.shared.totalSize()]) }
+    }
+
+    /** Plays a downloaded file in iOS's own player; resolves when the player is closed. */
+    @objc func playLocal(_ call: CAPPluginCall) {
+        guard let path = call.getString("path"), path.hasPrefix("/") else { return call.resolve(["ok": false, "error": "no path"]) }
+        var subs: [LocalPlayer.Sub] = []
+        for s in (options(call)["subtitles"] as? [[String: Any]]) ?? [] {
+            guard let p = s["path"] as? String else { continue }
+            subs.append(LocalPlayer.Sub(path: p, lang: (s["lang"] as? String) ?? "", label: (s["label"] as? String) ?? ""))
+        }
+        let err = LocalPlayer.present(path: path, title: call.getString("title") ?? "", start: call.getDouble("start") ?? 0,
+                                      subs: subs, from: bridge?.viewController) { pos, dur, watched in
+            call.resolve(["ok": true, "position": pos, "duration": dur, "watched": watched])
+        }
+        if let e = err { call.resolve(["ok": false, "error": e]) }
+    }
+
     @objc func getStreamMeta(_ call: CAPPluginCall) { call.resolve([:]) }
     @objc func getBlockStats(_ call: CAPPluginCall) { call.resolve([:]) }
     @objc func voiceSearch(_ call: CAPPluginCall) { call.reject("Voice search isn't available on iOS yet.") }
@@ -217,6 +317,13 @@ public class StreambertPlugin: CAPPlugin, CAPBridgedPlugin, UNUserNotificationCe
 
     @objc func openInPlayer(_ call: CAPPluginCall) {
         guard let s = call.getString("url") ?? call.getString("path") else { return call.reject("no url") }
+        if s.hasPrefix("/") {
+            // a downloaded file -> iOS's own player
+            let err = LocalPlayer.present(path: s, title: call.getString("title") ?? "", start: 0, subs: [],
+                                          from: bridge?.viewController) { _, _, _ in }
+            if let e = err { return call.resolve(["ok": false, "error": e]) }
+            return call.resolve(["ok": true, "player": "native"])
+        }
         let url = s.hasPrefix("/") ? URL(fileURLWithPath: s) : URL(string: s)
         guard let u = url else { return call.reject("bad url") }
         DispatchQueue.main.async { UIApplication.shared.open(u) { ok in call.resolve(["ok": ok]) } }

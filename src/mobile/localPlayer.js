@@ -1,6 +1,7 @@
 // Full-screen in-app player for downloaded files (desktop opens VLC/mpv instead).
 // Shows public/sb-player.html in an overlay iframe; that page plays local HLS
 // folders (index.m3u8 + segments) with hls.js and mp4 natively.
+import { Capacitor } from "@capacitor/core";
 import { native, fileSrc } from "./native.js";
 
 const P = native.plugin;
@@ -55,7 +56,40 @@ export function closeLocalPlayer() {
 }
 window.__sbLocalPlayerClose = closeLocalPlayer;
 
-export function openLocalPlayer({ filePath, seconds = 0, subtitlePaths = [], title = "", media = null }) {
+// iOS: downloaded HLS folders play in iOS's own player (StreambertPlugin.playLocal);
+// the web view can't reliably play a local HLS playlist. Falls back to the
+// in-app player below if the native player isn't available.
+const IOS = Capacitor.getPlatform() === "ios";
+
+async function openNativePlayer({ filePath, seconds = 0, subtitlePaths = [], title = "", media = null }) {
+  const key = String(filePath || "");
+  const start = seconds > 0 ? seconds : savedResume(key);
+  const subtitles = (subtitlePaths || [])
+    .filter((s) => s?.path && /\.(vtt|srt)$/i.test(s.path))
+    .map((s, i) => ({ path: s.path, lang: (s.lang || "und").slice(0, 8), label: s.label || s.lang || `Subtitle ${i + 1}` }));
+  const r = await P.playLocal({ path: key, title, start: Math.floor(start), subtitles });
+  if (!r?.ok) throw new Error(r?.error || "native player failed");
+  savePos(key, Number(r.position) || 0, Number(r.duration) || 0);
+  const secs = Math.min(Number(r.watched) || 0, 86400);
+  if (media && secs > 0) {
+    try {
+      const { trackWatchSecond, flushStats } = await import("./libraryExtras.js");
+      for (let i = 0; i < secs; i++) trackWatchSecond(media);
+      flushStats();
+    } catch {}
+  }
+}
+
+export function openLocalPlayer(opts) {
+  if (IOS && /\.m3u8$/i.test(String(opts?.filePath || ""))) {
+    closeLocalPlayer();
+    openNativePlayer(opts).catch(() => openWebPlayer(opts));
+    return;
+  }
+  openWebPlayer(opts);
+}
+
+function openWebPlayer({ filePath, seconds = 0, subtitlePaths = [], title = "", media = null }) {
   closeLocalPlayer();
   const key = String(filePath || "");
   const start = seconds > 0 ? seconds : savedResume(key);

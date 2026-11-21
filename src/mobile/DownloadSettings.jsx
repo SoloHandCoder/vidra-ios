@@ -101,6 +101,11 @@ export default function AndroidDownloadSettings() {
   return (
     <div style={{ marginBottom: 40 }}>
       <div className="settings-section-title">Save downloads to</div>
+      {s.ios ? (
+        <div style={{ fontSize: 13, color: "var(--text3)", lineHeight: 1.6, marginBottom: 18 }}>
+          Downloads are kept in Vidra's own storage. You can also find them in the Files app under On My iPhone → Vidra → Downloads.
+        </div>
+      ) : (
       <div style={{ display: "flex", flexDirection: "column", gap: 8, marginBottom: 18 }}>
         {LOCATIONS.map((l) => {
           const active = s.location === l.id;
@@ -147,6 +152,7 @@ export default function AndroidDownloadSettings() {
           );
         })}
       </div>
+      )}
 
       <div className="settings-section-title">Download options</div>
       <Row
@@ -155,12 +161,14 @@ export default function AndroidDownloadSettings() {
       >
         <Switch value={s.wifiOnly} onChange={(v) => set({ wifiOnly: v })} label="Wi-Fi only" />
       </Row>
+      {!s.ios && (
       <Row
         title="Save as MP4"
         desc="Converts streams into a single .mp4 file after downloading, so other apps can play them. If a video can't be converted it's kept in the app's own format."
       >
         <Switch value={s.convertMp4} onChange={(v) => set({ convertMp4: v })} label="Save as MP4" />
       </Row>
+      )}
       {msg && <div style={{ marginTop: 6, fontSize: 13, color: msg.startsWith("✓") ? "#4caf50" : "var(--red)" }}>{msg}</div>}
       <SmartDownloadSettings />
     </div>
